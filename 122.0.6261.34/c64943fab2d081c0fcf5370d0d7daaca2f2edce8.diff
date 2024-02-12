@@ -1,0 +1,28 @@
+commit c64943fab2d081c0fcf5370d0d7daaca2f2edce8
+Author: John Doe <jdoe@email.com>
+Date:   Sun Feb 11 23:48:51 2024 +0800
+
+    win7dep: remove unused kNotAvailableWin7 enum    2023-01-30 23:21:01    ad4e557fabd0b15abc180aefbdb27e16de64002b
+
+diff --git a/chrome/browser/ui/webui/conflicts/conflicts_data_fetcher.cc b/chrome/browser/ui/webui/conflicts/conflicts_data_fetcher.cc
+index f8342a344c72e..dcff65191e16a 100644
+--- a/chrome/browser/ui/webui/conflicts/conflicts_data_fetcher.cc
++++ b/chrome/browser/ui/webui/conflicts/conflicts_data_fetcher.cc
+@@ -221,6 +221,8 @@ std::string GetModuleStatusString(
+ enum ThirdPartyFeaturesStatus {
+   // The third-party features are not available in non-Google Chrome builds.
+   kNonGoogleChromeBuild,
++  // The third-party features are not available on Windows 7.
++  kNotAvailableWin7,
+   // The ThirdPartyBlockingEnabled group policy is disabled.
+   kPolicyDisabled,
+   // Both the IncompatibleApplicationsWarning and the
+@@ -292,6 +294,8 @@ std::string GetThirdPartyFeaturesStatusString(ThirdPartyFeaturesStatus status) {
+     case ThirdPartyFeaturesStatus::kNonGoogleChromeBuild:
+       return "The third-party features are not available in non-Google Chrome "
+              "builds.";
++    case ThirdPartyFeaturesStatus::kNotAvailableWin7:
++      return "The third-party features are not available on Windows 7.";
+     case ThirdPartyFeaturesStatus::kPolicyDisabled:
+       return "The ThirdPartyBlockingEnabled group policy is disabled.";
+     case ThirdPartyFeaturesStatus::kFeatureDisabled:

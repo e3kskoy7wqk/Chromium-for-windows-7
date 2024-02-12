@@ -1,0 +1,53 @@
+commit 904251081601d97979f30069d0c5e744acbce1a6
+Author: John Doe <jdoe@email.com>
+Date:   Sun Feb 11 23:50:07 2024 +0800
+
+    win7dep: Make installer/updater fail pre win10.    2023-01-06 01:21:46    9c677bc699ff7bf2f6e225ca52452a24a9a4eebb
+
+diff --git a/chrome/installer/setup/setup_main.cc b/chrome/installer/setup/setup_main.cc
+index de72d2c0db3ac..ac3fff8d547de 100644
+--- a/chrome/installer/setup/setup_main.cc
++++ b/chrome/installer/setup/setup_main.cc
+@@ -1622,10 +1622,10 @@ int SetupMain() {
+     persistent_histogram_storage.Disable();
+   }
+ 
+-  // Check to make sure current system is Win10 or later. If not, log
++  // Check to make sure current system is Win7 or later. If not, log
+   // error message and get out.
+   if (!InstallUtil::IsOSSupported()) {
+-    LOG(ERROR) << "Chrome only supports Windows 10 or later.";
++    LOG(ERROR) << "Chrome only supports Windows 7 or later.";
+     installer_state.WriteInstallerResult(installer::OS_NOT_SUPPORTED,
+                                          IDS_INSTALL_OS_NOT_SUPPORTED_BASE,
+                                          nullptr);
+diff --git a/chrome/installer/util/install_util.cc b/chrome/installer/util/install_util.cc
+index 03a38089b56a8..4f65769abaaa9 100644
+--- a/chrome/installer/util/install_util.cc
++++ b/chrome/installer/util/install_util.cc
+@@ -243,10 +243,10 @@ base::Version InstallUtil::GetCriticalUpdateVersion() {
+ }
+ 
+ bool InstallUtil::IsOSSupported() {
+-  // We do not support anything prior to Windows 10.
++  // We do not support anything prior to Windows 7.
+   VLOG(1) << base::SysInfo::OperatingSystemName() << ' '
+           << base::SysInfo::OperatingSystemVersion();
+-  return base::win::GetVersion() >= base::win::Version::WIN10;
++  return base::win::GetVersion() >= base::win::Version::WIN7;
+ }
+ 
+ void InstallUtil::AddInstallerResultItems(bool system_install,
+diff --git a/chrome/updater/win/installer/installer.cc b/chrome/updater/win/installer/installer.cc
+index 0cb917e3c840b..a38733785a874 100644
+--- a/chrome/updater/win/installer/installer.cc
++++ b/chrome/updater/win/installer/installer.cc
+@@ -324,7 +324,7 @@ ProcessExitResult InstallerMain(HMODULE module) {
+   CHECK(EnableSecureDllLoading());
+   EnableProcessHeapMetadataProtection();
+ 
+-  if (base::win::GetVersion() < base::win::Version::WIN10) {
++  if (base::win::GetVersion() < base::win::Version::WIN7) {
+     return ProcessExitResult(UNSUPPORTED_WINDOWS_VERSION);
+   }
+ 

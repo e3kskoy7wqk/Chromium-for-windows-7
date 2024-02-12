@@ -1,0 +1,39 @@
+commit d5b58ce0ee1df180e753d452dae6b531540ed1f8
+Author: John Doe <jdoe@email.com>
+Date:   Sun Feb 11 23:44:47 2024 +0800
+
+    Enable MojoIpcz by default on most platforms    2023-02-22 09:54:21    4d7d662656d266ee915192ec60e6c1b7c0e9ccd0
+
+diff --git a/mojo/core/embedder/embedder.cc b/mojo/core/embedder/embedder.cc
+index da19df4f20b5d..e30f4f2af23b2 100644
+--- a/mojo/core/embedder/embedder.cc
++++ b/mojo/core/embedder/embedder.cc
+@@ -39,12 +39,7 @@ namespace mojo::core {
+ 
+ namespace {
+ 
+-#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
+ std::atomic<bool> g_mojo_ipcz_enabled{false};
+-#else
+-// Default to enabled even if InitFeatures() is never called.
+-std::atomic<bool> g_mojo_ipcz_enabled{true};
+-#endif
+ 
+ }  // namespace
+ 
+diff --git a/mojo/core/embedder/features.cc b/mojo/core/embedder/features.cc
+index a3b2ae1b54986..8c788a6581e66 100644
+--- a/mojo/core/embedder/features.cc
++++ b/mojo/core/embedder/features.cc
+@@ -33,11 +33,7 @@ BASE_FEATURE(kMojoInlineMessagePayloads,
+              "MojoInlineMessagePayloads",
+              base::FEATURE_DISABLED_BY_DEFAULT);
+ 
+-#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
+ BASE_FEATURE(kMojoIpcz, "MojoIpcz", base::FEATURE_DISABLED_BY_DEFAULT);
+-#else
+-BASE_FEATURE(kMojoIpcz, "MojoIpcz", base::FEATURE_ENABLED_BY_DEFAULT);
+-#endif
+ 
+ }  // namespace core
+ }  // namespace mojo

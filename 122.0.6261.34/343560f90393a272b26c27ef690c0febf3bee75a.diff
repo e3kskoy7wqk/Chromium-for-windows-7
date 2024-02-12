@@ -1,0 +1,18 @@
+commit 343560f90393a272b26c27ef690c0febf3bee75a
+Author: John Doe <jdoe@email.com>
+Date:   Sun Feb 11 23:49:07 2024 +0800
+
+    win7dep: remove WIN10 DCHECK in ui/native_theme    2023-01-25 06:04:33    1e2370365dd3120fda50fcd0fd2512ff3ad66385
+
+diff --git a/ui/native_theme/caption_style_win.cc b/ui/native_theme/caption_style_win.cc
+index 4966f5c5c5762..a8b745c946aea 100644
+--- a/ui/native_theme/caption_style_win.cc
++++ b/ui/native_theme/caption_style_win.cc
+@@ -173,6 +173,7 @@ std::string GetCssColorWithAlpha(CC::ClosedCaptionColor caption_color,
+ 
+ absl::optional<CaptionStyle> InitializeFromSystemSettings() {
+   TRACE_EVENT0("ui", "InitializeFromSystemSettings");
++  DCHECK_GE(base::win::GetVersion(), base::win::Version::WIN10);
+   DCHECK(base::FeatureList::IsEnabled(features::kSystemCaptionStyle));
+ 
+   // Need to do this check before using ScopedHString.

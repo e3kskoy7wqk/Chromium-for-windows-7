@@ -1,0 +1,39 @@
+commit 7fd6d08619ea1f21784b2550af6d2bfb8a572bf2
+Author: John Doe <jdoe@email.com>
+Date:   Sun Feb 11 23:42:20 2024 +0800
+
+    Switch to PSAPI_VERSION=2 to avoid having to load psapi.dll    2019-01-08 00:31:39    5dc8c450e4ac2c18d3abd6d75730ff6a35fc2ccc
+
+diff --git a/build/config/BUILD.gn b/build/config/BUILD.gn
+index f341687194878..fba9ac5fe0e8c 100644
+--- a/build/config/BUILD.gn
++++ b/build/config/BUILD.gn
+@@ -171,6 +171,7 @@ config("default_libs") {
+       "odbc32.lib",
+       "odbccp32.lib",
+       "oleaut32.lib",
++      "psapi.lib",
+       "shell32.lib",
+       "shlwapi.lib",
+       "user32.lib",
+diff --git a/build/config/win/BUILD.gn b/build/config/win/BUILD.gn
+index 6e1417aa40076..bc0d21b47ff8d 100644
+--- a/build/config/win/BUILD.gn
++++ b/build/config/win/BUILD.gn
+@@ -243,7 +243,7 @@ config("runtime_library") {
+     "_ATL_NO_OPENGL",
+     "_WINDOWS",
+     "CERT_CHAIN_PARA_HAS_EXTRA_FIELDS",
+-    "PSAPI_VERSION=2",
++    "PSAPI_VERSION=1",
+     "WIN32",
+     "_SECURE_ATL",
+   ]
+@@ -436,7 +436,6 @@ config("delayloads") {
+     "/DELAYLOAD:oleacc.dll",
+     "/DELAYLOAD:pdh.dll",
+     "/DELAYLOAD:propsys.dll",
+-    "/DELAYLOAD:psapi.dll",
+     "/DELAYLOAD:rpcrt4.dll",
+     "/DELAYLOAD:rstrtmgr.dll",
+     "/DELAYLOAD:setupapi.dll",

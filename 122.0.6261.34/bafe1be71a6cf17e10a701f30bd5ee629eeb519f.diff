@@ -1,0 +1,197 @@
+commit bafe1be71a6cf17e10a701f30bd5ee629eeb519f
+Author: John Doe <jdoe@email.com>
+Date:   Sun Feb 11 23:49:26 2024 +0800
+
+    win7dep: remove win7/8 code from c/b/shell_integration    2023-01-19 03:00:31    4141d1bd474a33bd036a277e9cb5fd300e9c7506
+
+diff --git a/chrome/browser/shell_integration.cc b/chrome/browser/shell_integration.cc
+index 9c94c9450e179..d1c309597a9b9 100644
+--- a/chrome/browser/shell_integration.cc
++++ b/chrome/browser/shell_integration.cc
+@@ -111,6 +111,12 @@ bool CanSetAsDefaultBrowser() {
+   return GetDefaultBrowserSetPermission() != SET_DEFAULT_NOT_ALLOWED;
+ }
+ 
++#if !BUILDFLAG(IS_WIN)
++bool IsElevationNeededForSettingDefaultSchemeClient() {
++  return false;
++}
++#endif  // !BUILDFLAG(IS_WIN)
++
+ base::CommandLine CommandLineArgsForLauncher(
+     const GURL& url,
+     const std::string& extension_app_id,
+diff --git a/chrome/browser/shell_integration.h b/chrome/browser/shell_integration.h
+index 7f634f7dbb922..bd6bf9932e700 100644
+--- a/chrome/browser/shell_integration.h
++++ b/chrome/browser/shell_integration.h
+@@ -69,6 +69,10 @@ DefaultWebClientSetPermission GetDefaultSchemeClientSetPermission();
+ // GetDefaultWebClientSetPermission() if this distinction is important.
+ bool CanSetAsDefaultBrowser();
+ 
++// Returns true if making the running browser the default client for any
++// scheme requires elevated privileges.
++bool IsElevationNeededForSettingDefaultSchemeClient();
++
+ // Returns a string representing the application to be launched given the
+ // scheme of the requested url. This string may be a name or a path, but
+ // neither is guaranteed and it should only be used as a display string.
+diff --git a/chrome/browser/shell_integration_win.cc b/chrome/browser/shell_integration_win.cc
+index 33dd144edb997..21d5739ef0ef7 100644
+--- a/chrome/browser/shell_integration_win.cc
++++ b/chrome/browser/shell_integration_win.cc
+@@ -40,6 +40,7 @@
+ #include "base/win/scoped_propvariant.h"
+ #include "base/win/shlwapi.h"
+ #include "base/win/shortcut.h"
++#include "base/win/windows_version.h"
+ #include "chrome/browser/policy/policy_path_parser.h"
+ #include "chrome/browser/shell_integration.h"
+ #include "chrome/browser/web_applications/os_integration/web_app_shortcut_win.h"
+@@ -66,7 +67,8 @@ BASE_FEATURE(kWin10UnattendedDefaultExportDerived,
+              base::FEATURE_DISABLED_BY_DEFAULT);
+ 
+ bool CanSetAsDefaultDirectly() {
+-  return base::FeatureList::IsEnabled(kWin10UnattendedDefaultExportDerived);
++  return base::win::GetVersion() >= base::win::Version::WIN10 &&
++         base::FeatureList::IsEnabled(kWin10UnattendedDefaultExportDerived);
+ }
+ 
+ // Helper function for GetAppId to generates profile id
+@@ -699,10 +701,16 @@ bool SetAsDefaultClientForScheme(const std::string& scheme) {
+   return true;
+ }
+ 
++bool IsElevationNeededForSettingDefaultSchemeClient() {
++  return base::win::GetVersion() < base::win::Version::WIN8;
++}
++
+ std::u16string GetApplicationNameForScheme(const GURL& url) {
+-  std::u16string application_name = GetAppForSchemeUsingAssocQuery(url);
+-  if (!application_name.empty()) {
+-    return application_name;
++  // Windows 8 or above has a new scheme association query.
++  if (base::win::GetVersion() >= base::win::Version::WIN8) {
++    std::u16string application_name = GetAppForSchemeUsingAssocQuery(url);
++    if (!application_name.empty())
++      return application_name;
+   }
+ 
+   return GetAppForSchemeUsingRegistry(url);
+diff --git a/chrome/browser/ui/startup/default_browser_infobar_delegate.cc b/chrome/browser/ui/startup/default_browser_infobar_delegate.cc
+index a2724af3f2cc2..b5a37e5732f4c 100644
+--- a/chrome/browser/ui/startup/default_browser_infobar_delegate.cc
++++ b/chrome/browser/ui/startup/default_browser_infobar_delegate.cc
+@@ -93,6 +93,13 @@ std::u16string DefaultBrowserInfoBarDelegate::GetButtonLabel(
+   return l10n_util::GetStringUTF16(IDS_DEFAULT_BROWSER_INFOBAR_OK_BUTTON_LABEL);
+ }
+ 
++// Setting an app as the default browser doesn't require elevation directly, but
++// it does require registering it as the protocol handler for "http", so if
++// protocol registration in general requires elevation, this does as well.
++bool DefaultBrowserInfoBarDelegate::OKButtonTriggersUACPrompt() const {
++  return shell_integration::IsElevationNeededForSettingDefaultSchemeClient();
++}
++
+ bool DefaultBrowserInfoBarDelegate::Accept() {
+   action_taken_ = true;
+   base::RecordAction(base::UserMetricsAction("DefaultBrowserInfoBar_Accept"));
+diff --git a/chrome/browser/ui/startup/default_browser_infobar_delegate.h b/chrome/browser/ui/startup/default_browser_infobar_delegate.h
+index 531bc268127de..00ea64ed6e6eb 100644
+--- a/chrome/browser/ui/startup/default_browser_infobar_delegate.h
++++ b/chrome/browser/ui/startup/default_browser_infobar_delegate.h
+@@ -57,6 +57,7 @@ class DefaultBrowserInfoBarDelegate : public ConfirmInfoBarDelegate {
+   std::u16string GetMessageText() const override;
+   int GetButtons() const override;
+   std::u16string GetButtonLabel(InfoBarButton button) const override;
++  bool OKButtonTriggersUACPrompt() const override;
+   bool Accept() override;
+ 
+   // The WebContents's corresponding profile.
+diff --git a/chrome/browser/ui/views/infobars/confirm_infobar.cc b/chrome/browser/ui/views/infobars/confirm_infobar.cc
+index 549f973d47f84..1bd6ea95a1b22 100644
+--- a/chrome/browser/ui/views/infobars/confirm_infobar.cc
++++ b/chrome/browser/ui/views/infobars/confirm_infobar.cc
+@@ -10,6 +10,7 @@
+ #include "base/functional/bind.h"
+ #include "build/build_config.h"
+ #include "chrome/browser/ui/views/chrome_layout_provider.h"
++#include "chrome/browser/ui/views/elevation_icon_setter.h"
+ #include "ui/base/ui_base_features.h"
+ #include "ui/base/window_open_disposition.h"
+ #include "ui/views/controls/button/label_button.h"
+@@ -43,6 +44,11 @@ ConfirmInfoBar::ConfirmInfoBar(std::unique_ptr<ConfirmInfoBarDelegate> delegate)
+     ok_button_ = create_button(ConfirmInfoBarDelegate::BUTTON_OK,
+                                &ConfirmInfoBar::OkButtonPressed);
+     ok_button_->SetStyle(ui::ButtonStyle::kProminent);
++    if (delegate_ptr->OKButtonTriggersUACPrompt()) {
++      elevation_icon_setter_ = std::make_unique<ElevationIconSetter>(
++          ok_button_,
++          base::BindOnce(&ConfirmInfoBar::Layout, base::Unretained(this)));
++    }
+     ok_button_->SetImageModel(
+         views::Button::STATE_NORMAL,
+         delegate_ptr->GetButtonImage(ConfirmInfoBarDelegate::BUTTON_OK));
+@@ -92,7 +98,10 @@ ConfirmInfoBar::ConfirmInfoBar(std::unique_ptr<ConfirmInfoBarDelegate> delegate)
+   link_ = AddChildView(CreateLink(delegate_ptr->GetLinkText()));
+ }
+ 
+-ConfirmInfoBar::~ConfirmInfoBar() = default;
++ConfirmInfoBar::~ConfirmInfoBar() {
++  // Ensure |elevation_icon_setter_| is destroyed before |ok_button_|.
++  elevation_icon_setter_.reset();
++}
+ 
+ void ConfirmInfoBar::Layout() {
+   InfoBarView::Layout();
+diff --git a/chrome/browser/ui/views/infobars/confirm_infobar.h b/chrome/browser/ui/views/infobars/confirm_infobar.h
+index bceaa6485737e..bec67e3750519 100644
+--- a/chrome/browser/ui/views/infobars/confirm_infobar.h
++++ b/chrome/browser/ui/views/infobars/confirm_infobar.h
+@@ -9,6 +9,8 @@
+ #include "chrome/browser/ui/views/infobars/infobar_view.h"
+ #include "components/infobars/core/confirm_infobar_delegate.h"
+ 
++class ElevationIconSetter;
++
+ namespace views {
+ class Label;
+ class MdTextButton;
+@@ -51,6 +53,7 @@ class ConfirmInfoBar : public InfoBarView {
+   raw_ptr<views::MdTextButton> cancel_button_ = nullptr;
+   raw_ptr<views::MdTextButton> extra_button_ = nullptr;
+   raw_ptr<views::Link> link_ = nullptr;
++  std::unique_ptr<ElevationIconSetter> elevation_icon_setter_;
+ };
+ 
+ #endif  // CHROME_BROWSER_UI_VIEWS_INFOBARS_CONFIRM_INFOBAR_H_
+diff --git a/components/infobars/core/confirm_infobar_delegate.cc b/components/infobars/core/confirm_infobar_delegate.cc
+index 400de2cb8455e..9fb80c8912173 100644
+--- a/components/infobars/core/confirm_infobar_delegate.cc
++++ b/components/infobars/core/confirm_infobar_delegate.cc
+@@ -61,6 +61,10 @@ std::u16string ConfirmInfoBarDelegate::GetButtonTooltip(
+   return std::u16string();
+ }
+ 
++bool ConfirmInfoBarDelegate::OKButtonTriggersUACPrompt() const {
++  return false;
++}
++
+ #if BUILDFLAG(IS_IOS)
+ bool ConfirmInfoBarDelegate::UseIconBackgroundTint() const {
+   return true;
+diff --git a/components/infobars/core/confirm_infobar_delegate.h b/components/infobars/core/confirm_infobar_delegate.h
+index b04ea73e00fe0..dc89f7e64b181 100644
+--- a/components/infobars/core/confirm_infobar_delegate.h
++++ b/components/infobars/core/confirm_infobar_delegate.h
+@@ -73,6 +73,10 @@ class ConfirmInfoBarDelegate : public infobars::InfoBarDelegate {
+   // returns an empty tooltip.
+   virtual std::u16string GetButtonTooltip(InfoBarButton button) const;
+ 
++  // Returns whether or not the OK button will trigger a UAC elevation prompt on
++  // Windows.
++  virtual bool OKButtonTriggersUACPrompt() const;
++
+ #if BUILDFLAG(IS_IOS)
+   // Returns whether or not a tint should be applied to the icon background.
+   // Defaults to true.

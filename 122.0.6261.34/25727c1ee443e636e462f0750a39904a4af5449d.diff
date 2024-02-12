@@ -1,0 +1,24 @@
+commit 25727c1ee443e636e462f0750a39904a4af5449d
+Author: John Doe <jdoe@email.com>
+Date:   Sun Feb 11 23:48:11 2024 +0800
+
+    win7dep: Remove code only needed for Win7    2023-02-22 01:42:33    59ea690d1838a90cb1449922b0a5768be755ffef
+
+diff --git a/components/policy/core/common/policy_loader_win.cc b/components/policy/core/common/policy_loader_win.cc
+index a2d631447ca5b..920d6fa98289b 100644
+--- a/components/policy/core/common/policy_loader_win.cc
++++ b/components/policy/core/common/policy_loader_win.cc
+@@ -239,6 +239,13 @@ PolicyLoaderWin::PolicyLoaderWin(
+ }
+ 
+ PolicyLoaderWin::~PolicyLoaderWin() {
++  // Mitigate the issues caused by loading DLLs or lazily resolving symbols on a
++  // background thread (http://crbug/973868) which can hold the process wide
++  // LoaderLock and cause contention on Foreground threads. This issue is solved
++  // on Windows version after Win7. This code can be removed when Win7 is no
++  // longer supported.
++  SCOPED_MAY_LOAD_LIBRARY_AT_BACKGROUND_PRIORITY();
++
+   if (!user_policy_watcher_failed_) {
+     ::UnregisterGPNotification(user_policy_changed_event_.handle());
+     user_policy_watcher_.StopWatching();

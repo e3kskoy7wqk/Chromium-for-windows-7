@@ -1,0 +1,94 @@
+commit 5b76cde5f86fdaf6c4e64ea316e94ff0e8f1fa0a
+Author: John Doe <jdoe@email.com>
+Date:   Sun Feb 11 23:45:23 2024 +0800
+
+    remove OnJobEmpty and OnProcessEmpty from sandbox policy    2023-03-30 09:57:04    0da61a42f2556375cc91c2cbd15d2a7e904b0569
+
+diff --git a/sandbox/win/src/broker_services.cc b/sandbox/win/src/broker_services.cc
+index 08e1f13c4501e..649ec4ea3b0e9 100644
+--- a/sandbox/win/src/broker_services.cc
++++ b/sandbox/win/src/broker_services.cc
+@@ -82,6 +82,7 @@ struct JobTracker {
+     // As if TerminateProcess() was called for all associated processes.
+     // Handles are still valid.
+     ::TerminateJobObject(policy->GetJobHandle(), sandbox::SBOX_ALL_OK);
++    policy->OnJobEmpty();
+   }
+ 
+   std::unique_ptr<sandbox::PolicyBase> policy;
+diff --git a/sandbox/win/src/sandbox_policy_base.cc b/sandbox/win/src/sandbox_policy_base.cc
+index fc7e9f775a13a..2faf389d09011 100644
+--- a/sandbox/win/src/sandbox_policy_base.cc
++++ b/sandbox/win/src/sandbox_policy_base.cc
+@@ -455,11 +455,7 @@ PolicyBase::PolicyBase(std::string_view tag)
+   dispatcher_ = std::make_unique<TopLevelDispatcher>(this);
+ }
+ 
+-PolicyBase::~PolicyBase() {
+-  // Ensure this is cleared before other members - this terminates the process
+-  // if it hasn't already finished.
+-  target_.reset();
+-}
++PolicyBase::~PolicyBase() {}
+ 
+ TargetConfig* PolicyBase::GetConfig() {
+   return config();
+@@ -687,6 +683,18 @@ ResultCode PolicyBase::ApplyToTarget(std::unique_ptr<TargetProcess> target) {
+   return SBOX_ALL_OK;
+ }
+ 
++// Can only be called if a job was associated with this policy.
++bool PolicyBase::OnJobEmpty() {
++  target_.reset();
++  return true;
++}
++
++bool PolicyBase::OnProcessFinished(DWORD process_id) {
++  if (target_->ProcessId() == process_id)
++    target_.reset();
++  return true;
++}
++
+ EvalResult PolicyBase::EvalPolicy(IpcTag service,
+                                   CountedParameterSetBase* params) {
+   PolicyGlobal* policy = config()->policy();
+diff --git a/sandbox/win/src/sandbox_policy_base.h b/sandbox/win/src/sandbox_policy_base.h
+index 090d51f701614..d3e68e5e66497 100644
+--- a/sandbox/win/src/sandbox_policy_base.h
++++ b/sandbox/win/src/sandbox_policy_base.h
+@@ -202,6 +202,14 @@ class PolicyBase final : public TargetPolicy {
+   // call to TargetProcess::Init() is issued.
+   ResultCode ApplyToTarget(std::unique_ptr<TargetProcess> target);
+ 
++  // Called when there are no more active processes in the policy's Job.
++  // If a process is not in a job, call OnProcessFinished().
++  bool OnJobEmpty();
++
++  // Called when a process no longer needs to be tracked. Processes in jobs
++  // should be notified via OnJobEmpty instead.
++  bool OnProcessFinished(DWORD process_id);
++
+   EvalResult EvalPolicy(IpcTag service, CountedParameterSetBase* params);
+ 
+   HANDLE GetStdoutHandle();
+@@ -240,6 +248,8 @@ class PolicyBase final : public TargetPolicy {
+   // Returns nullopt if no data has been set, or a view into the data.
+   std::optional<base::span<const uint8_t>> delegate_data_span();
+ 
++  // The policy takes ownership of a target as it is applied to it.
++  std::unique_ptr<TargetProcess> target_;
+   // The user-defined global policy settings.
+   HANDLE stdout_handle_;
+   HANDLE stderr_handle_;
+@@ -252,10 +262,8 @@ class PolicyBase final : public TargetPolicy {
+   // This list contains handles other than the stderr/stdout handles which are
+   // shared with the target at times.
+   base::HandlesToInheritVector handles_to_share_;
+-  Job job_;
+ 
+-  // The policy takes ownership of a target as it is applied to it.
+-  std::unique_ptr<TargetProcess> target_;
++  Job job_;
+ };
+ 
+ }  // namespace sandbox
