@@ -2,7 +2,7 @@
 setlocal EnableDelayedExpansion
 
 REM Set the path to the repository
-set "REPO_PATH=E:\workspace\chromium\src\third_party\boringssl\src"
+set "REPO_PATH=E:\win7dep\chromium\src\third_party\boringssl\src"
 
 REM Temporary file for storing commit hashes
 set "temp_file=temp.txt"

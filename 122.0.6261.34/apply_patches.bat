@@ -2,7 +2,7 @@
 setlocal EnableDelayedExpansion
 
 REM Set the path to the repository
-set "REPO_PATH=E:\workspace\chromium\src"
+set "REPO_PATH=E:\win7dep\chromium\src"
 
 REM Temporary file for storing commit hashes
 set "temp_file=temp.txt"
