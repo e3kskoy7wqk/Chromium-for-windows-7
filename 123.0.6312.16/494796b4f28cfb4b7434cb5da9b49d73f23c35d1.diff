@@ -61,7 +61,7 @@ index 5e28dfc9a2819..860917f493c12 100644
      PA_ALWAYS_INLINE constexpr uintptr_t ASLRMask() {
        return AslrMask(47);
      }
-+    constexpr PA_ALWAYS_INLINE uintptr_t ASLRMaskBefore8_10() {
++    PA_ALWAYS_INLINE constexpr uintptr_t ASLRMaskBefore8_10() {
 +      return AslrMask(43);
 +    }
      // Try not to map pages into the range where Windows loads DLLs by default.

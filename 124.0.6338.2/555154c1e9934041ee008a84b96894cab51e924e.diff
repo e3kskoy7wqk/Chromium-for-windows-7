@@ -1,0 +1,1023 @@
+
+
+diff --git a/chrome/browser/ui/color/win/native_chrome_color_mixer_win.cc b/chrome/browser/ui/color/win/native_chrome_color_mixer_win.cc
+index a9521f587881e..82d23a37daa43 100644
+--- a/chrome/browser/ui/color/win/native_chrome_color_mixer_win.cc
++++ b/chrome/browser/ui/color/win/native_chrome_color_mixer_win.cc
+@@ -30,6 +30,13 @@
+ #include "ui/views/views_features.h"
+ 
+ namespace {
++
++SkColor GetDefaultInactiveFrameColor() {
++  return base::win::GetVersion() < base::win::Version::WIN10
++             ? SkColorSetRGB(0xEB, 0xEB, 0xEB)
++             : SK_ColorWHITE;
++}
++
+ // This class encapsulates much of the same logic from ThemeHelperWin pertaining
+ // to the calculation of frame colors on Windows 8, 10 and up. Once the
+ // ColorProvider is permanently switched on, all the relevant code from
+@@ -145,7 +152,7 @@ void FrameColorHelper::AddNativeChromeColors(
+       } else if (ShouldDefaultThemeUseMicaTitlebar()) {
+         inactive_frame_transform = {key.color_mode == ColorMode::kDark
+                                         ? kSystemMicaDarkFrameColor
+-                                        : kSystemMicaLightFrameColor};
++                                        : GetDefaultInactiveFrameColor()};
+       }
+     }
+ 
+@@ -225,7 +232,8 @@ bool FrameColorHelper::DwmColorsAllowed(
+     const ui::ColorProviderKey& key) const {
+   const bool use_native_frame_if_enabled =
+       (!ShouldAlwaysUseSystemTitlebar() ||
+-       !HasCustomImage(IDR_THEME_FRAME, key));
++       !HasCustomImage(IDR_THEME_FRAME, key)) &&
++      (base::win::GetVersion() >= base::win::Version::WIN8);
+   return use_native_frame_if_enabled && ui::win::IsAeroGlassEnabled();
+ }
+ 
+@@ -265,10 +273,14 @@ void FrameColorHelper::FetchAccentColors() {
+   }
+ 
+   dwm_accent_border_color_ =
+-      accent_color_observer->accent_border_color().value_or(SK_ColorWHITE);
++      accent_color_observer->accent_border_color().value_or(GetDefaultInactiveFrameColor());
+ 
+-  dwm_frame_color_ = accent_color;
+-  dwm_inactive_frame_color_ = accent_color_observer->accent_color_inactive();
++  if (base::win::GetVersion() < base::win::Version::WIN10) {
++    dwm_frame_color_ = dwm_accent_border_color_;
++  } else {
++    dwm_frame_color_ = accent_color_observer->accent_color();
++    dwm_inactive_frame_color_ = accent_color_observer->accent_color_inactive();
++  }
+ }
+ 
+ ui::ColorTransform GetCaptionForegroundColor(
+diff --git a/chrome/browser/ui/frame/window_frame_util.cc b/chrome/browser/ui/frame/window_frame_util.cc
+index b2966b46fe9db..cfe6ae3be971c 100644
+--- a/chrome/browser/ui/frame/window_frame_util.cc
++++ b/chrome/browser/ui/frame/window_frame_util.cc
+@@ -8,6 +8,7 @@
+ #include "ui/gfx/geometry/size.h"
+ 
+ #if BUILDFLAG(IS_WIN)
++#include "base/win/windows_version.h"
+ #include "chrome/browser/ui/browser.h"
+ #include "chrome/browser/ui/ui_features.h"
+ #include "ui/base/ui_base_features.h"
+@@ -34,7 +35,8 @@ gfx::Size WindowFrameUtil::GetWindowsCaptionButtonAreaSize() {
+ bool WindowFrameUtil::IsWindowsTabSearchCaptionButtonEnabled(
+     const Browser* browser) {
+ #if BUILDFLAG(IS_WIN)
+-  return !features::IsChromeRefresh2023() && browser->is_type_normal();
++  return !features::IsChromeRefresh2023() && browser->is_type_normal() &&
++         base::win::GetVersion() >= base::win::Version::WIN10;
+ #else
+   return false;
+ #endif  // BUILDFLAG(IS_WIN)
+diff --git a/chrome/browser/ui/startup/startup_browser_creator_browsertest.cc b/chrome/browser/ui/startup/startup_browser_creator_browsertest.cc
+index abb93ab01626f..e59f96e5653c9 100644
+--- a/chrome/browser/ui/startup/startup_browser_creator_browsertest.cc
++++ b/chrome/browser/ui/startup/startup_browser_creator_browsertest.cc
+@@ -170,6 +170,10 @@
+ using testing::Return;
+ #endif  // !BUILDFLAG(IS_CHROMEOS_ASH)
+ 
++#if BUILDFLAG(IS_WIN)
++#include "base/win/windows_version.h"
++#endif
++
+ #if BUILDFLAG(IS_MAC)
+ #include "chrome/browser/apps/app_shim/app_shim_manager_mac.h"
+ #include "chrome/browser/chrome_browser_application_mac.h"
+@@ -207,6 +211,14 @@ Browser* FindOneOtherBrowser(Browser* browser) {
+   return other_browser;
+ }
+ 
++bool IsWindows10OrNewer() {
++#if BUILDFLAG(IS_WIN)
++  return base::win::GetVersion() >= base::win::Version::WIN10;
++#else
++  return false;
++#endif
++}
++
+ void DisableWelcomePages(const std::vector<Profile*>& profiles) {
+   for (Profile* profile : profiles)
+     profile->GetPrefs()->SetBoolean(prefs::kHasSeenWelcomePage, true);
+@@ -2598,6 +2610,14 @@ class StartupBrowserWebAppProtocolHandlingTest : public InProcessBrowserTest {
+  protected:
+   StartupBrowserWebAppProtocolHandlingTest() = default;
+ 
++  bool AreProtocolHandlersSupported() {
++#if BUILDFLAG(IS_WIN)
++    return base::win::GetVersion() > base::win::Version::WIN7;
++#else
++    return true;
++#endif
++  }
++
+   void SetUpOnMainThread() override {
+     InProcessBrowserTest::SetUpOnMainThread();
+   }
+@@ -2665,6 +2685,9 @@ class StartupBrowserWebAppProtocolHandlingTest : public InProcessBrowserTest {
+ IN_PROC_BROWSER_TEST_F(
+     StartupBrowserWebAppProtocolHandlingTest,
+     WebAppLaunch_WebAppIsNotLaunchedWithProtocolUrlAndDialogCancel) {
++  if (!AreProtocolHandlersSupported())
++    GTEST_SKIP() << "Protocol Handlers unsupported";
++
+   views::NamedWidgetShownWaiter waiter(views::test::AnyWidgetTestPasskey{},
+                                        "ProtocolHandlerLaunchDialogView");
+ 
+@@ -2689,6 +2712,9 @@ IN_PROC_BROWSER_TEST_F(
+ IN_PROC_BROWSER_TEST_F(
+     StartupBrowserWebAppProtocolHandlingTest,
+     WebAppLaunch_WebAppIsLaunchedWithProtocolUrlAndDialogAccept) {
++  if (!AreProtocolHandlersSupported())
++    GTEST_SKIP() << "Protocol Handlers unsupported";
++
+   views::NamedWidgetShownWaiter waiter(views::test::AnyWidgetTestPasskey{},
+                                        "ProtocolHandlerLaunchDialogView");
+ 
+@@ -2742,6 +2768,9 @@ IN_PROC_BROWSER_TEST_F(
+ IN_PROC_BROWSER_TEST_F(
+     StartupBrowserWebAppProtocolHandlingTest,
+     WebAppLaunch_WebAppIsNotTranslatedWithUnhandledProtocolUrl) {
++  if (!AreProtocolHandlersSupported())
++    GTEST_SKIP() << "Protocol Handlers unsupported";
++
+   // Register web app as a protocol handler that should *not* handle the launch.
+   apps::ProtocolHandlerInfo protocol_handler;
+   const std::string handler_url = std::string(kStartUrl) + "/testing=%s";
+@@ -2772,6 +2801,9 @@ IN_PROC_BROWSER_TEST_F(
+ IN_PROC_BROWSER_TEST_F(
+     StartupBrowserWebAppProtocolHandlingTest,
+     WebAppLaunch_WebAppIsLaunchedWithAllowedProtocolUrlPref) {
++  if (!AreProtocolHandlersSupported())
++    GTEST_SKIP() << "Protocol Handlers unsupported";
++
+   views::NamedWidgetShownWaiter waiter(views::test::AnyWidgetTestPasskey{},
+                                        "ProtocolHandlerLaunchDialogView");
+ 
+@@ -2838,6 +2870,9 @@ IN_PROC_BROWSER_TEST_F(
+ 
+ IN_PROC_BROWSER_TEST_F(StartupBrowserWebAppProtocolHandlingTest,
+                        WebAppLaunch_WebAppIsLaunchedWithAllowedProtocol) {
++  if (!AreProtocolHandlersSupported())
++    GTEST_SKIP() << "Protocol Handlers unsupported";
++
+   // Register web app as a protocol handler that should handle the launch.
+   apps::ProtocolHandlerInfo protocol_handler;
+   const std::string handler_url = std::string(kStartUrl) + "/testing=%s";
+@@ -2907,6 +2942,9 @@ IN_PROC_BROWSER_TEST_F(StartupBrowserWebAppProtocolHandlingTest,
+ IN_PROC_BROWSER_TEST_F(
+     StartupBrowserWebAppProtocolHandlingTest,
+     WebAppLaunch_WebAppIsLaunchedWithDiallowedProtocolUrlPref) {
++  if (!AreProtocolHandlersSupported())
++    GTEST_SKIP() << "Protocol Handlers unsupported";
++
+   views::NamedWidgetShownWaiter waiter(views::test::AnyWidgetTestPasskey{},
+                                        "ProtocolHandlerLaunchDialogView");
+ 
+@@ -2942,6 +2980,9 @@ IN_PROC_BROWSER_TEST_F(
+ IN_PROC_BROWSER_TEST_F(
+     StartupBrowserWebAppProtocolHandlingTest,
+     WebAppLaunch_WebAppIsLaunchedWithDisallowedOnceProtocol) {
++  if (!AreProtocolHandlersSupported())
++    GTEST_SKIP() << "Protocol Handlers unsupported";
++
+   // Register web app as a protocol handler that should handle the launch.
+   apps::ProtocolHandlerInfo protocol_handler;
+   const std::string handler_url = std::string(kStartUrl) + "/testing=%s";
+@@ -2994,6 +3035,9 @@ class StartupBrowserWebAppProtocolAndFileHandlingTest
+ // handling launch, not a protocol handling or URL launch.
+ IN_PROC_BROWSER_TEST_F(StartupBrowserWebAppProtocolAndFileHandlingTest,
+                        WebAppLaunch_FileProtocol) {
++  if (!AreProtocolHandlersSupported())
++    GTEST_SKIP() << "Protocol Handlers unsupported";
++
+   // Install an app with protocol handlers and a handler for plain text files.
+   apps::ProtocolHandlerInfo protocol_handler;
+   const std::string handler_url = std::string(kStartUrl) + "/protocol=%s";
+@@ -3157,9 +3201,8 @@ IN_PROC_BROWSER_TEST_P(StartupBrowserCreatorFirstRunTest, AddFirstRunTabs) {
+ #endif
+ IN_PROC_BROWSER_TEST_P(StartupBrowserCreatorFirstRunTest,
+                        MAYBE_RestoreOnStartupURLsPolicySpecified) {
+-#if BUILDFLAG(IS_WIN)
+-  return;
+-#endif  // BUILDFLAG(IS_WIN)
++  if (IsWindows10OrNewer())
++    return;
+ 
+   ASSERT_TRUE(embedded_test_server()->Start());
+   StartupBrowserCreator browser_creator;
+@@ -3358,17 +3401,18 @@ IN_PROC_BROWSER_TEST_P(StartupBrowserCreatorFirstRunTest,
+   ScopedProfileKeepAlive profile1_keep_alive(
+       profile1_ptr, ProfileKeepAliveOrigin::kBrowserWindow);
+ 
+-#if BUILDFLAG(IS_WIN)
+-  // Windows has its own Welcome page but even that should not show up when
++  // Windows 10 has its own Welcome page but even that should not show up when
+   // the policy is set.
+-  ASSERT_EQ(1, tab_strip->count());
+-  EXPECT_EQ("title1.html",
+-            tab_strip->GetWebContentsAt(0)->GetVisibleURL().ExtractFileName());
++  if (IsWindows10OrNewer()) {
++    ASSERT_EQ(1, tab_strip->count());
++    EXPECT_EQ(
++        "title1.html",
++        tab_strip->GetWebContentsAt(0)->GetVisibleURL().ExtractFileName());
+ 
+-  browser = CloseBrowserAndOpenNew(browser, profile1_ptr);
+-  ASSERT_TRUE(browser);
+-  tab_strip = browser->tab_strip_model();
+-#endif  // BUILDFLAG(IS_WIN)
++    browser = CloseBrowserAndOpenNew(browser, profile1_ptr);
++    ASSERT_TRUE(browser);
++    tab_strip = browser->tab_strip_model();
++  }
+ 
+   // Ensure that the policy page page appears on second run on Win 10, and
+   // on first run on all other platforms.
+diff --git a/chrome/browser/ui/views/apps/app_window_frame_view_win.cc b/chrome/browser/ui/views/apps/app_window_frame_view_win.cc
+index cdd99c6adf68c..a84a3bd3ce4ff 100644
+--- a/chrome/browser/ui/views/apps/app_window_frame_view_win.cc
++++ b/chrome/browser/ui/views/apps/app_window_frame_view_win.cc
+@@ -6,8 +6,7 @@
+ 
+ #include <windows.h>
+ 
+-#include <algorithm>
+-
++#include "base/win/windows_version.h"
+ #include "extensions/browser/app_window/native_app_window.h"
+ #include "ui/base/hit_test.h"
+ #include "ui/base/metadata/metadata_impl_macros.h"
+@@ -33,13 +32,32 @@ gfx::Insets AppWindowFrameViewWin::GetFrameInsets() const {
+       display::win::ScreenWin::GetSystemMetricsInDIP(SM_CYSIZEFRAME) +
+       display::win::ScreenWin::GetSystemMetricsInDIP(SM_CYCAPTION);
+ 
+-  return gfx::Insets::TLBR(caption_height, 0, 0, 0);
++  int frame_size =
++      base::win::GetVersion() < base::win::Version::WIN10
++          ? display::win::ScreenWin::GetSystemMetricsInDIP(SM_CXSIZEFRAME)
++          : 0;
++
++  return gfx::Insets::TLBR(caption_height, frame_size, frame_size, frame_size);
+ }
+ 
+ gfx::Insets AppWindowFrameViewWin::GetClientAreaInsets(HMONITOR monitor) const {
+-  const int frame_thickness = ui::GetFrameThickness(monitor);
+-  return gfx::Insets::TLBR(0, frame_thickness, frame_thickness,
+-                           frame_thickness);
++  gfx::Insets insets;
++  if (base::win::GetVersion() < base::win::Version::WIN10) {
++    // This tells Windows that most of the window is a client area, meaning
++    // Chrome will draw it. Windows still fills in the glass bits because of the
++    // DwmExtendFrameIntoClientArea call in |UpdateDWMFrame|.
++    // Without this 1 pixel offset on the right and bottom:
++    //   * windows paint in a more standard way, and
++    //   * we get weird black bars at the top when maximized in multiple monitor
++    //     configurations.
++    int border_thickness = 1;
++    insets = gfx::Insets::TLBR(0, 0, border_thickness, border_thickness);
++  } else {
++    const int frame_thickness = ui::GetFrameThickness(monitor);
++    insets =
++        gfx::Insets::TLBR(0, frame_thickness, frame_thickness, frame_thickness);
++  }
++  return insets;
+ }
+ 
+ gfx::Rect AppWindowFrameViewWin::GetBoundsForClientView() const {
+diff --git a/chrome/browser/ui/views/bookmarks/bookmark_bar_view_test.cc b/chrome/browser/ui/views/bookmarks/bookmark_bar_view_test.cc
+index c94f585b552e9..b28a93cc18c4d 100644
+--- a/chrome/browser/ui/views/bookmarks/bookmark_bar_view_test.cc
++++ b/chrome/browser/ui/views/bookmarks/bookmark_bar_view_test.cc
+@@ -84,6 +84,7 @@
+ #endif
+ 
+ #if BUILDFLAG(IS_WIN)
++#include "base/win/windows_version.h"
+ #include "ui/aura/window_tree_host.h"
+ #endif
+ 
+@@ -1608,6 +1609,14 @@ class BookmarkBarViewTest17 : public BookmarkBarViewEventTestBase {
+ 
+  protected:
+   void DoTestOnMessageLoop() override {
++#if BUILDFLAG(IS_WIN)
++    // TODO(crbug.com/453796): Flaky on Windows7.
++    if (base::win::GetVersion() <= base::win::Version::WIN7) {
++      Done();
++      return;
++    }
++#endif
++
+     // Move the mouse to the "All Bookmarks" button and press the left mouse
+     // button.
+     OpenMenuByClick(bb_view_->all_bookmarks_button(),
+diff --git a/chrome/browser/ui/views/create_application_shortcut_view.cc b/chrome/browser/ui/views/create_application_shortcut_view.cc
+index 2a60e28a136f0..2ccee19953946 100644
+--- a/chrome/browser/ui/views/create_application_shortcut_view.cc
++++ b/chrome/browser/ui/views/create_application_shortcut_view.cc
+@@ -30,6 +30,7 @@
+ 
+ #if BUILDFLAG(IS_WIN)
+ #include "base/win/shortcut.h"
++#include "base/win/windows_version.h"
+ #include "chrome/installer/util/taskbar_util.h"
+ #endif  // BUILDFLAG(IS_WIN)
+ 
+@@ -131,9 +132,14 @@ void CreateChromeApplicationShortcutView::InitControls() {
+   std::unique_ptr<views::Checkbox> pin_to_taskbar_checkbox;
+ 
+ #if BUILDFLAG(IS_WIN)
+-  menu_check_box = AddCheckbox(
+-      l10n_util::GetStringUTF16(IDS_CREATE_SHORTCUTS_START_MENU_CHKBOX),
+-      prefs::kWebAppCreateInAppsMenu);
++  base::win::Version version = base::win::GetVersion();
++  // Do not allow creating shortcuts on the Start Screen for Windows 8.
++  if (version != base::win::Version::WIN8 &&
++      version != base::win::Version::WIN8_1) {
++    menu_check_box = AddCheckbox(
++        l10n_util::GetStringUTF16(IDS_CREATE_SHORTCUTS_START_MENU_CHKBOX),
++        prefs::kWebAppCreateInAppsMenu);
++  }
+ 
+   // Only include the pin-to-taskbar option when running on versions of Windows
+   // that support pinning.
+diff --git a/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_win.cc b/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_win.cc
+index eca31bb82943f..c1306870f51ea 100644
+--- a/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_win.cc
++++ b/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_win.cc
+@@ -264,6 +264,9 @@ bool BrowserDesktopWindowTreeHostWin::UsesNativeSystemMenu() const {
+ void BrowserDesktopWindowTreeHostWin::Init(
+     const views::Widget::InitParams& params) {
+   DesktopWindowTreeHostWin::Init(params);
++  if (base::win::GetVersion() < base::win::Version::WIN10)
++    return;  // VirtualDesktopManager isn't supported pre Win-10.
++
+   virtual_desktop_helper_ = new VirtualDesktopHelper(params.workspace);
+   virtual_desktop_helper_->Init(GetHWND());
+ }
+@@ -369,12 +372,20 @@ bool BrowserDesktopWindowTreeHostWin::GetDwmFrameInsetsInPixels(
+     *insets = gfx::Insets();
+   } else {
+     // The glass should extend to the bottom of the tabstrip.
++    HWND hwnd = GetHWND();
+     gfx::Rect tabstrip_region_bounds(browser_frame_->GetBoundsForTabStripRegion(
+         browser_view_->tab_strip_region_view()->GetMinimumSize()));
+-    tabstrip_region_bounds = display::win::ScreenWin::DIPToClientRect(
+-        GetHWND(), tabstrip_region_bounds);
+-
+-    *insets = gfx::Insets::TLBR(tabstrip_region_bounds.bottom(), 0, 0, 0);
++    tabstrip_region_bounds =
++        display::win::ScreenWin::DIPToClientRect(hwnd, tabstrip_region_bounds);
++
++    // The 2 px (not DIP) at the inner edges of Win 7 glass are a light and dark
++    // line, so we must inset further to account for those.
++    constexpr int kWin7GlassInset = 2;
++    const int inset = (base::win::GetVersion() < base::win::Version::WIN8)
++                          ? kWin7GlassInset
++                          : 0;
++    *insets = gfx::Insets::TLBR(tabstrip_region_bounds.bottom() + inset, inset,
++                                inset, inset);
+   }
+   return true;
+ }
+@@ -474,6 +485,9 @@ void BrowserDesktopWindowTreeHostWin::PostHandleMSG(UINT message,
+ }
+ 
+ views::FrameMode BrowserDesktopWindowTreeHostWin::GetFrameMode() const {
++  if (IsOpaqueHostedAppFrame())
++    return views::FrameMode::CUSTOM_DRAWN;
++
+   const views::FrameMode system_frame_mode =
+       ShouldBrowserCustomDrawTitlebar(browser_view_)
+           ? views::FrameMode::SYSTEM_DRAWN_NO_CONTROLS
+@@ -503,6 +517,9 @@ bool BrowserDesktopWindowTreeHostWin::ShouldUseNativeFrame() const {
+   if (!browser_view_->browser())
+     return false;
+ 
++  if (IsOpaqueHostedAppFrame())
++    return false;
++
+   // We don't theme popup or app windows, so regardless of whether or not a
+   // theme is active for normal browser windows, we don't want to use the custom
+   // frame for popups/apps.
+@@ -567,6 +584,13 @@ void BrowserDesktopWindowTreeHostWin::UpdateWorkspace() {
+                      weak_factory_.GetWeakPtr()));
+ }
+ 
++bool BrowserDesktopWindowTreeHostWin::IsOpaqueHostedAppFrame() const {
++  // TODO(https://crbug.com/868239): Support Windows 7 Aero glass for web-app
++  // window titlebar controls.
++  return browser_view_->GetIsWebAppType() &&
++         base::win::GetVersion() < base::win::Version::WIN10;
++}
++
+ SkBitmap GetBadgedIconBitmapForProfile(Profile* profile) {
+   std::unique_ptr<gfx::ImageFamily> family = GetAppIconImageFamily();
+   if (!family)
+diff --git a/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_win.h b/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_win.h
+index a3bd2e0cae1d3..e52ca6cb5dd3f 100644
+--- a/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_win.h
++++ b/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_win.h
+@@ -88,6 +88,8 @@ class BrowserDesktopWindowTreeHostWin
+   // WindowTreeHost of its value.
+   void UpdateWorkspace();
+ 
++  bool IsOpaqueHostedAppFrame() const;
++
+   void SetWindowIcon(bool badged);
+ 
+   raw_ptr<BrowserView> browser_view_;
+diff --git a/chrome/browser/ui/views/frame/browser_frame_view_win.cc b/chrome/browser/ui/views/frame/browser_frame_view_win.cc
+index dbc20cddf8adf..1e1f31a9ed0c4 100644
+--- a/chrome/browser/ui/views/frame/browser_frame_view_win.cc
++++ b/chrome/browser/ui/views/frame/browser_frame_view_win.cc
+@@ -12,6 +12,7 @@
+ 
+ #include "base/trace_event/common/trace_event_common.h"
+ #include "base/trace_event/trace_event.h"
++#include "base/win/windows_version.h"
+ #include "chrome/app/chrome_command_ids.h"
+ #include "chrome/app/chrome_dll_resource.h"
+ #include "chrome/browser/themes/theme_properties.h"
+@@ -191,6 +192,10 @@ bool BrowserFrameViewWin::HasVisibleBackgroundTabShapes(
+     BrowserFrameActiveState active_state) const {
+   DCHECK(GetWidget());
+ 
++  // Pre-Win 8, tabs never match the glass frame appearance.
++  if (base::win::GetVersion() < base::win::Version::WIN8)
++    return true;
++
+   // Enabling high contrast mode disables the custom-drawn titlebar (so the
+   // system-drawn frame will respect the native frame colors) and enables the
+   // IncreasedContrastThemeSupplier (which does not respect the native frame
+@@ -204,6 +209,15 @@ bool BrowserFrameViewWin::HasVisibleBackgroundTabShapes(
+   return BrowserNonClientFrameView::HasVisibleBackgroundTabShapes(active_state);
+ }
+ 
++bool BrowserFrameViewWin::CanDrawStrokes() const {
++  // On Win 7, the tabs are drawn as flat shapes against the glass frame, so
++  // the active tab always has a visible shape and strokes are unnecessary.
++  if (base::win::GetVersion() < base::win::Version::WIN8)
++    return false;
++
++  return BrowserNonClientFrameView::CanDrawStrokes();
++}
++
+ SkColor BrowserFrameViewWin::GetCaptionColor(
+     BrowserFrameActiveState active_state) const {
+   return GetColorProvider()->GetColor(ShouldPaintAsActive(active_state)
+@@ -342,39 +356,41 @@ int BrowserFrameViewWin::NonClientHitTest(const gfx::Point& point) {
+     }
+   }
+ 
+-  // On Windows, the caption buttons are almost butted up to the top right
++  // On Windows 8+, the caption buttons are almost butted up to the top right
+   // corner of the window. This code ensures the mouse isn't set to a size
+   // cursor while hovering over the caption buttons, thus giving the incorrect
+   // impression that the user can resize the window.
+-  RECT button_bounds = {0};
+-  if (SUCCEEDED(DwmGetWindowAttribute(views::HWNDForWidget(frame()),
+-                                      DWMWA_CAPTION_BUTTON_BOUNDS,
+-                                      &button_bounds, sizeof(button_bounds)))) {
+-    gfx::RectF button_bounds_in_dips = gfx::ConvertRectToDips(
+-        gfx::Rect(button_bounds), display::win::GetDPIScale());
+-    // TODO(crbug.com/1131681): GetMirroredRect() requires an integer rect,
+-    // but the size in DIPs may not be an integer with a fractional device
+-    // scale factor. If we want to keep using integers, the choice to use
+-    // ToFlooredRectDeprecated() seems to be doing the wrong thing given the
+-    // comment below about insetting 1 DIP instead of 1 physical pixel. We
+-    // should probably use ToEnclosedRect() and then we could have inset 1
+-    // physical pixel here.
+-    gfx::Rect buttons =
+-        GetMirroredRect(gfx::ToFlooredRectDeprecated(button_bounds_in_dips));
+-
+-    // There is a small one-pixel strip right above the caption buttons in
+-    // which the resize border "peeks" through.
+-    constexpr int kCaptionButtonTopInset = 1;
+-    // The sizing region at the window edge above the caption buttons is
+-    // 1 px regardless of scale factor. If we inset by 1 before converting
+-    // to DIPs, the precision loss might eliminate this region entirely. The
+-    // best we can do is to inset after conversion. This guarantees we'll
+-    // show the resize cursor when resizing is possible. The cost of which
+-    // is also maybe showing it over the portion of the DIP that isn't the
+-    // outermost pixel.
+-    buttons.Inset(gfx::Insets::TLBR(kCaptionButtonTopInset, 0, 0, 0));
+-    if (buttons.Contains(point)) {
+-      return HTNOWHERE;
++  if (base::win::GetVersion() >= base::win::Version::WIN8) {
++    RECT button_bounds = {0};
++    if (SUCCEEDED(DwmGetWindowAttribute(views::HWNDForWidget(frame()),
++                                        DWMWA_CAPTION_BUTTON_BOUNDS,
++                                        &button_bounds,
++                                        sizeof(button_bounds)))) {
++      gfx::RectF button_bounds_in_dips = gfx::ConvertRectToDips(
++          gfx::Rect(button_bounds), display::win::GetDPIScale());
++      // TODO(crbug.com/1131681): GetMirroredRect() requires an integer rect,
++      // but the size in DIPs may not be an integer with a fractional device
++      // scale factor. If we want to keep using integers, the choice to use
++      // ToFlooredRectDeprecated() seems to be doing the wrong thing given the
++      // comment below about insetting 1 DIP instead of 1 physical pixel. We
++      // should probably use ToEnclosedRect() and then we could have inset 1
++      // physical pixel here.
++      gfx::Rect buttons =
++          GetMirroredRect(gfx::ToFlooredRectDeprecated(button_bounds_in_dips));
++
++      // There is a small one-pixel strip right above the caption buttons in
++      // which the resize border "peeks" through.
++      constexpr int kCaptionButtonTopInset = 1;
++      // The sizing region at the window edge above the caption buttons is
++      // 1 px regardless of scale factor. If we inset by 1 before converting
++      // to DIPs, the precision loss might eliminate this region entirely. The
++      // best we can do is to inset after conversion. This guarantees we'll
++      // show the resize cursor when resizing is possible. The cost of which
++      // is also maybe showing it over the portion of the DIP that isn't the
++      // outermost pixel.
++      buttons.Inset(gfx::Insets::TLBR(kCaptionButtonTopInset, 0, 0, 0));
++      if (buttons.Contains(point))
++        return HTNOWHERE;
+     }
+   }
+ 
+diff --git a/chrome/browser/ui/views/frame/browser_frame_view_win.h b/chrome/browser/ui/views/frame/browser_frame_view_win.h
+index fc9ab25369d8a..3ba633b58d812 100644
+--- a/chrome/browser/ui/views/frame/browser_frame_view_win.h
++++ b/chrome/browser/ui/views/frame/browser_frame_view_win.h
+@@ -42,6 +42,7 @@ class BrowserFrameViewWin : public BrowserNonClientFrameView,
+   int GetTopInset(bool restored) const override;
+   bool HasVisibleBackgroundTabShapes(
+       BrowserFrameActiveState active_state) const override;
++  bool CanDrawStrokes() const override;
+   SkColor GetCaptionColor(BrowserFrameActiveState active_state) const override;
+   void UpdateThrobber(bool running) override;
+   gfx::Size GetMinimumSize() const override;
+diff --git a/chrome/browser/ui/views/frame/browser_view.cc b/chrome/browser/ui/views/frame/browser_view.cc
+index ec249a76e75d0..e6deaa89bdcb0 100644
+--- a/chrome/browser/ui/views/frame/browser_view.cc
++++ b/chrome/browser/ui/views/frame/browser_view.cc
+@@ -323,6 +323,7 @@
+ #endif
+ 
+ #if BUILDFLAG(IS_WIN)
++#include "base/win/windows_version.h"
+ #include "chrome/browser/taskbar/taskbar_decorator_win.h"
+ #include "chrome/browser/win/jumplist.h"
+ #include "chrome/browser/win/jumplist_factory.h"
+@@ -1450,6 +1451,8 @@ bool BrowserView::IsOnCurrentWorkspace() const {
+   return chromeos::DesksHelper::Get(native_win)
+       ->BelongsToActiveDesk(native_win);
+ #elif BUILDFLAG(IS_WIN)
++  if (base::win::GetVersion() < base::win::Version::WIN10)
++    return true;
+   std::optional<bool> on_current_workspace =
+       native_win->GetHost()->on_current_workspace();
+   if (on_current_workspace.has_value())
+diff --git a/chrome/browser/ui/views/frame/minimize_button_metrics_win.cc b/chrome/browser/ui/views/frame/minimize_button_metrics_win.cc
+index 1e9aa01bc1db1..0a7154017bbb5 100644
+--- a/chrome/browser/ui/views/frame/minimize_button_metrics_win.cc
++++ b/chrome/browser/ui/views/frame/minimize_button_metrics_win.cc
+@@ -4,21 +4,36 @@
+ 
+ #include "chrome/browser/ui/views/frame/minimize_button_metrics_win.h"
+ 
+-#include <dwmapi.h>
+-
+ #include "base/check.h"
+ #include "base/i18n/rtl.h"
++#include "base/win/windows_version.h"
++#include "dwmapi.h"
+ #include "ui/base/win/shell.h"
+ #include "ui/display/win/screen_win.h"
+ #include "ui/gfx/geometry/point.h"
+ 
+ namespace {
+ 
+-const int kButtonBoundsPositionOffset = 6;
++// These constants were determined by manually adding various offsets
++// until the identity switcher was placed at the same location as before.
++// When a new or updated OS version is released, a new constant may need
++// to be added to this list and GetDefaultButtonBoundsOffset() is updated.
++const int kWin7ButtonBoundsPositionOffset = 1;
++const int kWin8ButtonBoundsPositionOffset = 10;
++const int kWin10ButtonBoundsPositionOffset = 6;
+ const int kInvalidOffset = static_cast<int>(0x80000000);
+ 
++using base::win::GetVersion;
+ using display::win::ScreenWin;
+ 
++int GetDefaultButtonBoundsOffset() {
++  if (GetVersion() >= base::win::Version::WIN10)
++    return kWin10ButtonBoundsPositionOffset;
++  if (GetVersion() >= base::win::Version::WIN8)
++    return kWin8ButtonBoundsPositionOffset;
++  return kWin7ButtonBoundsPositionOffset;
++}
++
+ }  // namespace
+ 
+ // static
+@@ -27,9 +42,14 @@ int MinimizeButtonMetrics::last_cached_minimize_button_x_delta_ = 0;
+ // static
+ int MinimizeButtonMetrics::button_bounds_position_offset_ = kInvalidOffset;
+ 
+-MinimizeButtonMetrics::MinimizeButtonMetrics() = default;
++MinimizeButtonMetrics::MinimizeButtonMetrics()
++    : hwnd_(nullptr),
++      cached_minimize_button_x_delta_(last_cached_minimize_button_x_delta_),
++      was_activated_(false) {
++}
+ 
+-MinimizeButtonMetrics::~MinimizeButtonMetrics() = default;
++MinimizeButtonMetrics::~MinimizeButtonMetrics() {
++}
+ 
+ void MinimizeButtonMetrics::Init(HWND hwnd) {
+   DCHECK(!hwnd_);
+@@ -58,18 +78,16 @@ int MinimizeButtonMetrics::GetButtonBoundsPositionOffset(
+     const RECT& button_bounds,
+     const RECT& window_bounds) const {
+   if (button_bounds_position_offset_ == kInvalidOffset) {
+-    if (!was_activated_ || !IsWindowVisible(hwnd_)) {
+-      return kButtonBoundsPositionOffset;
+-    }
++    if (!was_activated_ || !IsWindowVisible(hwnd_))
++      return GetDefaultButtonBoundsOffset();
+     TITLEBARINFOEX info = {0};
+     info.cbSize = sizeof(info);
+     SendMessage(hwnd_, WM_GETTITLEBARINFOEX, 0,
+                 reinterpret_cast<LPARAM>(&info));
+     if (info.rgrect[2].right == info.rgrect[2].left ||
+         (info.rgstate[2] & (STATE_SYSTEM_INVISIBLE | STATE_SYSTEM_OFFSCREEN |
+-                            STATE_SYSTEM_UNAVAILABLE))) {
+-      return kButtonBoundsPositionOffset;
+-    }
++                            STATE_SYSTEM_UNAVAILABLE)))
++      return GetDefaultButtonBoundsOffset();
+     button_bounds_position_offset_ =
+         info.rgrect[2].left - (button_bounds.left + window_bounds.left);
+   }
+diff --git a/chrome/browser/ui/views/frame/minimize_button_metrics_win.h b/chrome/browser/ui/views/frame/minimize_button_metrics_win.h
+index 651b7bf6099e1..c378b7e510fe2 100644
+--- a/chrome/browser/ui/views/frame/minimize_button_metrics_win.h
++++ b/chrome/browser/ui/views/frame/minimize_button_metrics_win.h
+@@ -43,15 +43,14 @@ class MinimizeButtonMetrics {
+ 
+   int GetMinimizeButtonOffsetForWindow() const;
+ 
+-  HWND hwnd_ = nullptr;
++  HWND hwnd_;
+ 
+   // Cached offset of the minimize button. If RTL this is the location of the
+   // minimize button, if LTR this is the offset from the right edge of the
+   // client area to the minimize button.
+-  mutable int cached_minimize_button_x_delta_ =
+-      last_cached_minimize_button_x_delta_;
++  mutable int cached_minimize_button_x_delta_;
+ 
+-  // Static cache of `cached_minimize_button_x_delta_`.
++  // Static cache of |cached_minimize_button_x_delta_|.
+   static int last_cached_minimize_button_x_delta_;
+ 
+   // Static cache of offset value representing the difference between
+@@ -59,7 +58,7 @@ class MinimizeButtonMetrics {
+   static int button_bounds_position_offset_;
+ 
+   // Has OnHWNDActivated() been invoked?
+-  bool was_activated_ = false;
++  bool was_activated_;
+ };
+ 
+ #endif  // CHROME_BROWSER_UI_VIEWS_FRAME_MINIMIZE_BUTTON_METRICS_WIN_H_
+diff --git a/chrome/browser/ui/views/tabs/tab_strip.cc b/chrome/browser/ui/views/tabs/tab_strip.cc
+index ed531bcb3e41c..75696411fed60 100644
+--- a/chrome/browser/ui/views/tabs/tab_strip.cc
++++ b/chrome/browser/ui/views/tabs/tab_strip.cc
+@@ -6,7 +6,6 @@
+ 
+ #include <stddef.h>
+ 
+-#include <algorithm>
+ #include <iterator>
+ #include <limits>
+ #include <memory>
+@@ -109,6 +108,7 @@
+ #include "ui/views/window/non_client_view.h"
+ 
+ #if BUILDFLAG(IS_WIN)
++#include "base/win/windows_version.h"
+ #include "ui/display/win/screen_win.h"
+ #include "ui/gfx/win/hwnd_util.h"
+ #include "ui/views/win/hwnd_util.h"
+@@ -2023,10 +2023,12 @@ bool TabStrip::ShouldHighlightCloseButtonAfterRemove() {
+ 
+ bool TabStrip::TitlebarBackgroundIsTransparent() const {
+ #if BUILDFLAG(IS_WIN)
+-  return false;
+-#else
++  // Windows 8+ uses transparent window contents (because the titlebar area is
++  // drawn by the system and not Chrome), but the actual titlebar is opaque.
++  if (base::win::GetVersion() >= base::win::Version::WIN8)
++    return false;
++#endif
+   return GetWidget()->ShouldWindowContentsBeTransparent();
+-#endif  // BUILDFLAG(IS_WIN)
+ }
+ 
+ int TabStrip::GetActiveTabWidth() const {
+diff --git a/chrome/browser/ui/views/tooltip/tooltip_browsertest.cc b/chrome/browser/ui/views/tooltip/tooltip_browsertest.cc
+index 02eb121db9339..2700bb7a9d2e0 100644
+--- a/chrome/browser/ui/views/tooltip/tooltip_browsertest.cc
++++ b/chrome/browser/ui/views/tooltip/tooltip_browsertest.cc
+@@ -6,6 +6,7 @@
+ #include "base/run_loop.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "base/test/test_simple_task_runner.h"
++#include "base/win/windows_version.h"
+ #include "build/build_config.h"
+ #include "chrome/browser/ui/browser.h"
+ #include "chrome/browser/ui/browser_commands.h"
+@@ -190,6 +191,28 @@ class TooltipBrowserTest : public InProcessBrowserTest {
+     return ChildFrameAt(web_contents_->GetPrimaryMainFrame(), index);
+   }
+ 
++  bool SkipTestForOldWinVersion() const {
++#if BUILDFLAG(IS_WIN)
++    // On older Windows version, tooltips are displayed with TooltipWin instead
++    // of TooltipAura. For TooltipAura, a tooltip is displayed using a Widget
++    // and a Label and for TooltipWin, it is displayed using a native win32
++    // control. Since the observer we use in this class is the
++    // AnyWidgetObserver, we don't receive any update from non-Widget tooltips.
++    // This doesn't mean that no tooltip is displayed on older platforms, but
++    // that we are unable to execute the browser test successfully because the
++    // tooltip displayed is not displayed using a Widget.
++    //
++    // For now, we can simply skip the tests on older platforms, but it might be
++    // a good idea to eventually implement a custom observer (e.g.,
++    // TooltipStateObserver) that would work for both TooltipAura and
++    // TooltipWin, or remove once and for all TooltipWin. For more information
++    // on why we still need TooltipWin on Win7, see https://crbug.com/1201440.
++    if (base::win::GetVersion() <= base::win::Version::WIN7)
++      return true;
++#endif  // BUILDFLAG(IS_WIN)
++    return false;
++  }
++
+   gfx::Point WebContentPositionToScreenCoordinate(int x, int y) {
+     return gfx::Point(x, y) + rwhv_->GetViewBounds().OffsetFromOrigin();
+   }
+@@ -218,6 +241,9 @@ class TooltipBrowserTest : public InProcessBrowserTest {
+ 
+ IN_PROC_BROWSER_TEST_F(TooltipBrowserTest,
+                        ShowTooltipFromWebContentWithCursor) {
++  if (SkipTestForOldWinVersion())
++    return;
++
+   NavigateToURL("/tooltip.html");
+   std::u16string expected_text = u"my tooltip";
+ 
+@@ -252,6 +278,9 @@ IN_PROC_BROWSER_TEST_F(TooltipBrowserTest,
+ #endif
+ IN_PROC_BROWSER_TEST_F(TooltipBrowserTest,
+                        MAYBE_ShowTooltipFromWebContentWithKeyboard) {
++  if (SkipTestForOldWinVersion())
++    return;
++
+   NavigateToURL("/tooltip.html");
+   std::u16string expected_text = u"my tooltip";
+ 
+@@ -278,6 +307,9 @@ IN_PROC_BROWSER_TEST_F(TooltipBrowserTest,
+ #endif
+ IN_PROC_BROWSER_TEST_F(TooltipBrowserTest,
+                        MAYBE_ShowTooltipFromIFrameWithKeyboard) {
++  if (SkipTestForOldWinVersion())
++    return;
++
+   // There are two tooltips in this file: one above the iframe and one inside
+   // the iframe.
+   NavigateToURL("/tooltip_in_iframe.html");
+@@ -328,6 +360,9 @@ IN_PROC_BROWSER_TEST_F(TooltipBrowserTest,
+ #endif
+ IN_PROC_BROWSER_TEST_F(TooltipBrowserTest,
+                        MAYBE_HideTooltipOnKeyPressTriggeredByCursor) {
++  if (SkipTestForOldWinVersion())
++    return;
++
+   NavigateToURL("/tooltip.html");
+   std::u16string expected_text = u"my tooltip";
+ 
+@@ -364,6 +399,10 @@ IN_PROC_BROWSER_TEST_F(TooltipBrowserTest,
+ #endif
+ IN_PROC_BROWSER_TEST_F(TooltipBrowserTest,
+                        MAYBE_HideTooltipOnKeyPressTriggeredByKeyboard) {
++  if (SkipTestForOldWinVersion()) {
++    return;
++  }
++
+   NavigateToURL("/tooltip.html");
+   std::u16string expected_text = u"my tooltip";
+ 
+@@ -394,6 +433,9 @@ IN_PROC_BROWSER_TEST_F(TooltipBrowserTest,
+ #endif
+ IN_PROC_BROWSER_TEST_F(TooltipBrowserTest,
+                        MAYBE_ScriptFocusHidesKeyboardTriggeredTooltip) {
++  if (SkipTestForOldWinVersion())
++    return;
++
+   NavigateToURL("/tooltip_two_buttons.html");
+   std::u16string expected_text_1 = u"my tooltip 1";
+   std::u16string expected_text_2 = u"my tooltip 2";
+diff --git a/chrome/browser/ui/views/touch_events_interactive_uitest_win.cc b/chrome/browser/ui/views/touch_events_interactive_uitest_win.cc
+index b2e27441866d4..84613dce7ca26 100644
+--- a/chrome/browser/ui/views/touch_events_interactive_uitest_win.cc
++++ b/chrome/browser/ui/views/touch_events_interactive_uitest_win.cc
+@@ -4,6 +4,7 @@
+ 
+ #include "base/memory/raw_ptr.h"
+ #include "base/run_loop.h"
++#include "base/win/windows_version.h"
+ #include "build/build_config.h"
+ #include "chrome/browser/ui/views/test/view_event_test_base.h"
+ #include "chrome/test/base/testing_profile.h"
+@@ -161,6 +162,13 @@ class TouchEventsViewTest : public ViewEventTestBase {
+   }
+ 
+   void DoTestOnMessageLoop() override {
++    // ui_controls::SendTouchEvents which uses InjectTouchInput API only works
++    // on Windows 8 and up.
++    if (base::win::GetVersion() <= base::win::Version::WIN7) {
++      Done();
++      return;
++    }
++
+     const int touch_pointer_count = 3;
+     TouchEventHandler touch_event_handler;
+     window()->GetNativeWindow()->GetHost()->window()->AddPreTargetHandler(
+@@ -211,6 +219,13 @@ class TouchEventsRecursiveViewTest : public TouchEventsViewTest {
+       delete;
+ 
+   void DoTestOnMessageLoop() override {
++    // ui_controls::SendTouchEvents which uses InjectTouchInput API only works
++    // on Windows 8 and up.
++    if (base::win::GetVersion() <= base::win::Version::WIN7) {
++      Done();
++      return;
++    }
++
+     const int touch_pointer_count = 1;
+     TouchEventHandler touch_event_handler;
+     window()->GetNativeWindow()->GetHost()->window()->AddPreTargetHandler(
+diff --git a/chrome/browser/ui/webui/conflicts/conflicts_data_fetcher.cc b/chrome/browser/ui/webui/conflicts/conflicts_data_fetcher.cc
+index a1e904f7004f4..f8342a344c72e 100644
+--- a/chrome/browser/ui/webui/conflicts/conflicts_data_fetcher.cc
++++ b/chrome/browser/ui/webui/conflicts/conflicts_data_fetcher.cc
+@@ -8,6 +8,7 @@
+ #include <utility>
+ 
+ #include "base/strings/string_util.h"
++#include "base/win/windows_version.h"
+ #include "build/branding_buildflags.h"
+ #include "chrome/browser/win/conflicts/module_database.h"
+ #include "content/public/browser/browser_task_traits.h"
+@@ -262,6 +263,10 @@ ThirdPartyFeaturesStatus GetThirdPartyFeaturesStatus(
+     }
+   }
+ 
++  // Figure out why the manager instance doesn't exist.
++  if (base::win::GetVersion() <= base::win::Version::WIN7)
++    return kNotAvailableWin7;
++
+   if (!ModuleDatabase::IsThirdPartyBlockingPolicyEnabled())
+     return kPolicyDisabled;
+ 
+@@ -290,6 +295,9 @@ std::string GetThirdPartyFeaturesStatusString(ThirdPartyFeaturesStatus status) {
+     case ThirdPartyFeaturesStatus::kPolicyDisabled:
+       return "The ThirdPartyBlockingEnabled group policy is disabled.";
+     case ThirdPartyFeaturesStatus::kFeatureDisabled:
++      if (base::win::GetVersion() < base::win::Version::WIN10)
++        return "The ThirdPartyModulesBlocking feature is disabled.";
++
+       return "Both the IncompatibleApplicationsWarning and "
+              "ThirdPartyModulesBlocking features are disabled.";
+     case ThirdPartyFeaturesStatus::kModuleListInvalid:
+@@ -297,12 +305,17 @@ std::string GetThirdPartyFeaturesStatusString(ThirdPartyFeaturesStatus status) {
+     case ThirdPartyFeaturesStatus::kNoModuleListAvailable:
+       return "Disabled - There is no Module List version available.";
+     case ThirdPartyFeaturesStatus::kWarningInitialized:
++      DCHECK_GE(base::win::GetVersion(), base::win::Version::WIN10);
+       return "The IncompatibleApplicationsWarning feature is enabled, while "
+              "the ThirdPartyModulesBlocking feature is disabled.";
+     case ThirdPartyFeaturesStatus::kBlockingInitialized:
++      if (base::win::GetVersion() < base::win::Version::WIN10)
++        return "The ThirdPartyModulesBlocking feature is enabled.";
++
+       return "The ThirdPartyModulesBlocking feature is enabled, while the "
+              "IncompatibleApplicationsWarning feature is disabled.";
+     case ThirdPartyFeaturesStatus::kWarningAndBlockingInitialized:
++      DCHECK_GE(base::win::GetVersion(), base::win::Version::WIN10);
+       return "Both the IncompatibleApplicationsWarning and "
+              "ThirdPartyModulesBlocking features are enabled";
+   }
+@@ -460,7 +473,7 @@ void ConflictsDataFetcher::OnModuleDatabaseIdle() {
+   ModuleDatabase::GetInstance()->RemoveObserver(this);
+ 
+   base::Value::Dict results;
+-  results.Set("moduleCount", static_cast<int>(module_list_->size()));
++  results.Set("moduleCount", int(module_list_->size()));
+   results.Set("moduleList", std::move(*module_list_));
+   module_list_ = std::nullopt;
+ 
+diff --git a/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc b/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
+index 6ab17e03dbeca..0a052fb1fd892 100644
+--- a/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
++++ b/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
+@@ -143,6 +143,7 @@
+ #endif
+ 
+ #if BUILDFLAG(IS_WIN)
++#include "base/win/windows_version.h"
+ #include "device/fido/win/webauthn_api.h"
+ 
+ #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+@@ -306,7 +307,8 @@ void AddA11yStrings(content::WebUIDataSource* html_source) {
+   html_source->AddLocalizedStrings(kLocalizedStrings);
+ 
+ #if BUILDFLAG(IS_WIN)
+-  html_source->AddBoolean("isWindows10OrNewer", true);
++  html_source->AddBoolean("isWindows10OrNewer",
++                          base::win::GetVersion() >= base::win::Version::WIN10);
+ #endif
+ 
+ #if !BUILDFLAG(IS_CHROMEOS_ASH)
+diff --git a/chrome/browser/ui/webui/settings/settings_utils_win.cc b/chrome/browser/ui/webui/settings/settings_utils_win.cc
+index c39f0509e7d3d..9a662c5006cd8 100644
+--- a/chrome/browser/ui/webui/settings/settings_utils_win.cc
++++ b/chrome/browser/ui/webui/settings/settings_utils_win.cc
+@@ -14,6 +14,7 @@
+ #include "base/task/single_thread_task_runner.h"
+ #include "base/task/thread_pool.h"
+ #include "base/threading/thread.h"
++#include "base/win/windows_version.h"
+ #include "chrome/browser/browser_process.h"
+ #include "chrome/browser/platform_util.h"
+ #include "chrome/browser/profiles/profile.h"
+@@ -30,7 +31,7 @@ namespace {
+ // Shows a Windows certificate management dialog on the dialog thread.
+ class ManageCertificatesDialog : public ui::BaseShellDialogImpl {
+  public:
+-  ManageCertificatesDialog() = default;
++  ManageCertificatesDialog() {}
+ 
+   ManageCertificatesDialog(const ManageCertificatesDialog&) = delete;
+   ManageCertificatesDialog& operator=(const ManageCertificatesDialog&) = delete;
+@@ -102,9 +103,15 @@ void OpenConnectionDialogCallback() {
+ }
+ 
+ void ShowNetworkProxySettings(content::WebContents* /*web_contents*/) {
+-  // See
+-  // https://docs.microsoft.com/en-us/windows/uwp/launch-resume/launch-settings-app#network--internet
+-  platform_util::OpenExternal(GURL("ms-settings:network-proxy"));
++  if (base::win::GetVersion() >= base::win::Version::WIN10) {
++    // See
++    // https://docs.microsoft.com/en-us/windows/uwp/launch-resume/launch-settings-app#network--internet
++    platform_util::OpenExternal(GURL("ms-settings:network-proxy"));
++  } else {
++    base::ThreadPool::PostTask(
++        FROM_HERE, {base::TaskPriority::USER_VISIBLE, base::MayBlock()},
++        base::BindOnce(&OpenConnectionDialogCallback));
++  }
+ }
+ 
+ void ShowManageSSLCertificates(content::WebContents* web_contents) {
+diff --git a/chrome/browser/ui/webui/welcome/welcome_ui.cc b/chrome/browser/ui/webui/welcome/welcome_ui.cc
+index 266ab44ddf4fa..5ab71e8fb36be 100644
+--- a/chrome/browser/ui/webui/welcome/welcome_ui.cc
++++ b/chrome/browser/ui/webui/welcome/welcome_ui.cc
+@@ -30,6 +30,10 @@
+ #include "net/base/url_util.h"
+ #include "ui/base/webui/web_ui_util.h"
+ 
++#if BUILDFLAG(IS_WIN)
++#include "base/win/windows_version.h"
++#endif
++
+ namespace {
+ 
+ const char kPreviewBackgroundPath[] = "preview-background.jpg";
+@@ -141,7 +145,8 @@ WelcomeUI::WelcomeUI(content::WebUI* web_ui, const GURL& url)
+ #endif
+ 
+ #if BUILDFLAG(IS_WIN)
+-  html_source->AddBoolean("is_win10", true);
++  html_source->AddBoolean("is_win10",
++                          base::win::GetVersion() >= base::win::Version::WIN10);
+ #endif
+ 
+   // Add the shared bookmark handler for welcome modules.
