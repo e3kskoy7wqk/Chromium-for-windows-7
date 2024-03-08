@@ -1,0 +1,1377 @@
+
+
+diff --git a/.bazelrc b/.bazelrc
+index 8e652d45e6..123c46aa42 100644
+--- a/.bazelrc
++++ b/.bazelrc
+@@ -51,6 +51,7 @@ build --@io_bazel_rules_go//go/config:pure
+ #       included when exporting to other projects (CMake, GNI), to
+ #       //bazel/exporter/bazel_query_command.go.
+ # Public string flags
++build --flag_alias=fontmgr_factory=//bazel/common_config_settings:fontmgr_factory
+ build --flag_alias=gpu_backend=//src/gpu:gpu_backend
+ build --flag_alias=include_decoder=//src/codec:include_decoder
+ build --flag_alias=include_encoder=//src/encode:include_encoder
+diff --git a/BUILD.gn b/BUILD.gn
+index 1cfe2eae72..949573ab2d 100644
+--- a/BUILD.gn
++++ b/BUILD.gn
+@@ -29,6 +29,9 @@ config("skia_public") {
+   include_dirs = [ "." ]
+ 
+   defines = [
++    "SK_DEFAULT_TYPEFACE_IS_EMPTY",
++    "SK_DISABLE_LEGACY_DEFAULT_TYPEFACE",
++
+     "SK_CODEC_DECODES_BMP",
+     "SK_CODEC_DECODES_WBMP",
+     "SK_DISABLE_LEGACY_VULKAN_MUTABLE_TEXTURE_STATE",
+@@ -310,6 +313,15 @@ optional("android_utils") {
+   ]
+ }
+ 
++group("fontmgr_factory") {
++  public_deps = [ skia_fontmgr_factory ]
++}
++
++optional("fontmgr_empty_factory") {
++  enabled = true
++  sources = [ "src/ports/SkFontMgr_empty_factory.cpp" ]
++}
++
+ optional("fontmgr_android") {
+   enabled = skia_enable_fontmgr_android
+ 
+@@ -326,6 +338,11 @@ optional("fontmgr_android") {
+   ]
+   sources_for_tests = [ "tests/FontMgrAndroidParserTest.cpp" ]
+ }
++optional("fontmgr_android_factory") {
++  enabled = skia_enable_fontmgr_android
++  deps = [ ":fontmgr_android" ]
++  sources = [ "src/ports/SkFontMgr_android_factory.cpp" ]
++}
+ 
+ optional("fontmgr_custom") {
+   enabled =
+@@ -347,6 +364,11 @@ optional("fontmgr_custom_directory") {
+   public = [ "include/ports/SkFontMgr_directory.h" ]
+   sources = [ "src/ports/SkFontMgr_custom_directory.cpp" ]
+ }
++optional("fontmgr_custom_directory_factory") {
++  enabled = skia_enable_fontmgr_custom_directory
++  deps = [ ":fontmgr_custom_directory" ]
++  sources = [ "src/ports/SkFontMgr_custom_directory_factory.cpp" ]
++}
+ 
+ optional("fontmgr_custom_embedded") {
+   enabled = skia_enable_fontmgr_custom_embedded
+@@ -357,6 +379,11 @@ optional("fontmgr_custom_embedded") {
+   ]
+   sources = [ "src/ports/SkFontMgr_custom_embedded.cpp" ]
+ }
++optional("fontmgr_custom_embedded_factory") {
++  enabled = skia_enable_fontmgr_custom_embedded
++  deps = [ ":fontmgr_custom_embedded" ]
++  sources = [ "src/ports/SkFontMgr_custom_embedded_factory.cpp" ]
++}
+ 
+ optional("fontmgr_custom_empty") {
+   enabled = skia_enable_fontmgr_custom_empty
+@@ -368,6 +395,11 @@ optional("fontmgr_custom_empty") {
+   public = [ "include/ports/SkFontMgr_empty.h" ]
+   sources = [ "src/ports/SkFontMgr_custom_empty.cpp" ]
+ }
++optional("fontmgr_custom_empty_factory") {
++  enabled = skia_enable_fontmgr_custom_empty
++  deps = [ ":fontmgr_custom_empty" ]
++  sources = [ "src/ports/SkFontMgr_custom_empty_factory.cpp" ]
++}
+ 
+ optional("fontmgr_fontconfig") {
+   enabled = skia_enable_fontmgr_fontconfig
+@@ -380,6 +412,11 @@ optional("fontmgr_fontconfig") {
+   sources = [ "src/ports/SkFontMgr_fontconfig.cpp" ]
+   sources_for_tests = [ "tests/FontMgrFontConfigTest.cpp" ]
+ }
++optional("fontmgr_fontconfig_factory") {
++  enabled = skia_enable_fontmgr_fontconfig
++  deps = [ ":fontmgr_fontconfig" ]
++  sources = [ "src/ports/SkFontMgr_fontconfig_factory.cpp" ]
++}
+ 
+ optional("fontmgr_FontConfigInterface") {
+   enabled = skia_enable_fontmgr_FontConfigInterface
+@@ -401,6 +438,11 @@ optional("fontmgr_FontConfigInterface") {
+   ]
+   sources_for_tests = [ "tests/FCITest.cpp" ]
+ }
++optional("fontmgr_FontConfigInterface_factory") {
++  enabled = skia_enable_fontmgr_FontConfigInterface
++  deps = [ ":fontmgr_FontConfigInterface" ]
++  sources = [ "src/ports/SkFontMgr_FontConfigInterface_factory.cpp" ]
++}
+ 
+ optional("fontmgr_fontations_empty") {
+   enabled = skia_use_fontations
+@@ -455,6 +497,11 @@ optional("fontmgr_mac_ct") {
+     ]
+   }
+ }
++optional("fontmgr_mac_ct_factory") {
++  enabled = skia_use_fonthost_mac
++  deps = [ ":fontmgr_mac_ct" ]
++  sources = [ "src/ports/SkFontMgr_mac_ct_factory.cpp" ]
++}
+ 
+ optional("fontmgr_win") {
+   enabled = skia_enable_fontmgr_win
+@@ -491,6 +538,11 @@ optional("fontmgr_win") {
+     }
+   }
+ }
++optional("fontmgr_win_factory") {
++  enabled = skia_enable_fontmgr_win
++  deps = [ ":fontmgr_win" ]
++  sources = [ "src/ports/SkFontMgr_win_dw_factory.cpp" ]
++}
+ 
+ optional("fontmgr_win_gdi") {
+   enabled = skia_enable_fontmgr_win_gdi
+@@ -1465,6 +1517,7 @@ skia_component("skia") {
+   deps = [
+     ":android_utils",
+     ":avif",
++    ":fontmgr_factory",
+     ":heif",
+     ":hsw",
+     ":jpeg_decode",
+diff --git a/bazel/buildrc b/bazel/buildrc
+index c7490c0d14..cae319b87a 100644
+--- a/bazel/buildrc
++++ b/bazel/buildrc
+@@ -141,7 +141,7 @@ build:canvaskit_full --noincompatible_enable_cc_toolchain_resolution \
+                      --include_encoder=jpeg_encode_codec --include_encoder=png_encode_codec \
+                      --include_encoder=webp_encode_codec \
+                      \
+-                     --with_harfbuzz --with_icu --include_fontmgr=custom_embedded_fontmgr \
++                     --with_harfbuzz --with_icu --fontmgr_factory=custom_embedded_fontmgr_factory \
+                      --ck_enable_fonts --ck_enable_embedded_font \
+                      \
+                      --disable_tracing --enable_sksl_tracing \
+@@ -197,7 +197,7 @@ build:enforce_iwyu --features=skia_enforce_iwyu --cc_output_directory_tag=iwyu \
+                    --gpu_backend=vulkan_ganesh \
+                    --enable_gpu_test_utils \
+                    --include_fontmgr=custom_directory_fontmgr --include_fontmgr=custom_embedded_fontmgr \
+-                   --include_fontmgr=custom_empty_fontmgr \
++                   --include_fontmgr=custom_empty_fontmgr --fontmgr_factory=custom_directory_fontmgr_factory \
+                    --include_decoder=avif_decode_codec --include_decoder=gif_decode_codec \
+                    --include_decoder=jpeg_decode_codec --include_decoder=jxl_decode_codec \
+                    --include_decoder=png_decode_codec --include_decoder=raw_decode_codec \
+diff --git a/bazel/cc_binary_with_flags.bzl b/bazel/cc_binary_with_flags.bzl
+index e767f540ba..c0d41edbd2 100644
+--- a/bazel/cc_binary_with_flags.bzl
++++ b/bazel/cc_binary_with_flags.bzl
+@@ -26,6 +26,7 @@ _bool_flags = [
+ ]
+ 
+ _string_flags = [
++    "//bazel/common_config_settings:fontmgr_factory",
+     "//src/gpu:with_gl_standard",
+ ]
+ 
+diff --git a/bazel/exporter/bazel_query_command.go b/bazel/exporter/bazel_query_command.go
+index 803e75a4ec..ff59a65cde 100644
+--- a/bazel/exporter/bazel_query_command.go
++++ b/bazel/exporter/bazel_query_command.go
+@@ -41,6 +41,7 @@ var allSkiaFlags = []string{
+ 	"--enable_svg_canvas",
+ 	"--enable_tracing",
+ 	"--enable_vma",
++	// "--fontmgr_factory=custom_embedded_fontmgr_factory", // external dependency on ft2build.h
+ 	"--gpu_backend=gl_backend",
+ 	// "--include_decoder=*",  // All decoders have external dependencies.
+ 	// "--include_encoder",    // All encoders have external dependencies.
+diff --git a/defines.bzl b/defines.bzl
+index 2260c4e33d..f3c4447efa 100644
+--- a/defines.bzl
++++ b/defines.bzl
+@@ -7,6 +7,8 @@ load("//bazel:skia_rules.bzl", "select_multi")
+ 
+ GENERAL_DEFINES = [
+     "SK_GAMMA_APPLY_TO_A8",
++    "SK_DEFAULT_TYPEFACE_IS_EMPTY",
++    "SK_DISABLE_LEGACY_DEFAULT_TYPEFACE",
+ ] + select({
+     "//bazel/common_config_settings:debug_build": [
+         "SK_DEBUG",
+diff --git a/dm/DM.cpp b/dm/DM.cpp
+index 0ebdcf86f7..193626dfd5 100644
+--- a/dm/DM.cpp
++++ b/dm/DM.cpp
+@@ -1557,6 +1557,9 @@ int main(int argc, char** argv) {
+     setbuf(stdout, nullptr);
+     setup_crash_handler();
+ 
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_FACTORY)
++    ToolUtils::SetDefaultFontMgr();
++#endif
+     skiatest::SetFontTestDataDirectory();
+ 
+     gSkForceRasterPipelineBlitter     = FLAGS_forceRasterPipelineHP || FLAGS_forceRasterPipeline;
+diff --git a/gn/core.gni b/gn/core.gni
+index dc63e91692..c0a4c33099 100644
+--- a/gn/core.gni
++++ b/gn/core.gni
+@@ -372,6 +372,7 @@ skia_core_sources = [
+   "$_src/core/SkFontMetricsPriv.cpp",
+   "$_src/core/SkFontMetricsPriv.h",
+   "$_src/core/SkFontMgr.cpp",
++  "$_src/core/SkFontMgrPriv.h",
+   "$_src/core/SkFontPriv.h",
+   "$_src/core/SkFontScanner.h",
+   "$_src/core/SkFontStream.cpp",
+diff --git a/gn/skia.gni b/gn/skia.gni
+index 34dcb22879..e9676cb947 100644
+--- a/gn/skia.gni
++++ b/gn/skia.gni
+@@ -171,6 +171,31 @@ declare_args() {
+   skia_libgrapheme_third_party_dir = "//third_party/libgrapheme"
+ }
+ 
++declare_args() {
++  # skia_fontmgr_factory should define SkFontMgr::Factory()
++  if (skia_enable_fontmgr_empty) {
++    skia_fontmgr_factory = ":fontmgr_empty_factory"
++  } else if (is_android && skia_enable_fontmgr_android) {
++    skia_fontmgr_factory = ":fontmgr_android_factory"
++  } else if (is_win && skia_enable_fontmgr_win) {
++    skia_fontmgr_factory = ":fontmgr_win_factory"
++  } else if ((is_mac || is_ios) && skia_use_fonthost_mac) {
++    skia_fontmgr_factory = ":fontmgr_mac_ct_factory"
++  } else if (skia_enable_fontmgr_fontconfig) {
++    skia_fontmgr_factory = ":fontmgr_fontconfig_factory"
++  } else if (skia_enable_fontmgr_custom_directory) {
++    skia_fontmgr_factory = ":fontmgr_custom_directory_factory"
++  } else if (skia_enable_fontmgr_custom_embedded) {
++    skia_fontmgr_factory = ":fontmgr_custom_embedded_factory"
++  } else if (skia_enable_fontmgr_custom_empty) {
++    skia_fontmgr_factory = ":fontmgr_custom_empty_factory"
++  } else {
++    #"src/ports/SkFontMgr_FontConfigInterface_factory.cpp" #WontFix
++    #"src/ports/SkFontMgr_win_gdi_factory.cpp" # WontFix
++    skia_fontmgr_factory = ":fontmgr_empty_factory"
++  }
++}
++
+ assert(!skia_use_dawn || skia_enable_graphite)  # Dawn is Graphite-only
+ 
+ # Our tools require static linking (they use non-exported symbols), and the Ganesh backend.
+diff --git a/include/core/SkFontMgr.h b/include/core/SkFontMgr.h
+index 48f49f6845..c51b9cd47d 100644
+--- a/include/core/SkFontMgr.h
++++ b/include/core/SkFontMgr.h
+@@ -112,6 +112,11 @@ public:
+ 
+     sk_sp<SkTypeface> legacyMakeTypeface(const char familyName[], SkFontStyle style) const;
+ 
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_REFDEFAULT)
++    /** Return the default fontmgr. */
++    static sk_sp<SkFontMgr> RefDefault();
++#endif
++
+     /* Returns an empty font manager without any typeface dependencies */
+     static sk_sp<SkFontMgr> RefEmpty();
+ 
+@@ -138,6 +143,12 @@ protected:
+     virtual sk_sp<SkTypeface> onMakeFromFile(const char path[], int ttcIndex) const = 0;
+ 
+     virtual sk_sp<SkTypeface> onLegacyMakeTypeface(const char familyName[], SkFontStyle) const = 0;
++
++private:
++    /** Implemented by porting layer to return the default factory. */
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_FACTORY)
++    static sk_sp<SkFontMgr> Factory();
++#endif
+ };
+ 
+ #endif
+diff --git a/include/core/SkTypeface.h b/include/core/SkTypeface.h
+index d35396a9f2..e195f54584 100644
+--- a/include/core/SkTypeface.h
++++ b/include/core/SkTypeface.h
+@@ -105,9 +105,52 @@ public:
+      */
+     static bool Equal(const SkTypeface* facea, const SkTypeface* faceb);
+ 
++#if !defined(SK_DISABLE_LEGACY_DEFAULT_TYPEFACE)
++    /** Returns the default normal typeface, which is never nullptr. */
++    static sk_sp<SkTypeface> MakeDefault();
++#endif
+     /** Returns a non-null typeface which contains no glyphs. */
+     static sk_sp<SkTypeface> MakeEmpty();
+ 
++    /** Creates a new reference to the typeface that most closely matches the
++        requested familyName and fontStyle. This method allows extended font
++        face specifiers as in the SkFontStyle type. Will never return null.
++
++        @param familyName  May be NULL. The name of the font family.
++        @param fontStyle   The style of the typeface.
++        @return reference to the closest-matching typeface. Call must call
++              unref() when they are done.
++        Deprecated: call SkFontMgr::matchFamilyStyle or SkFontMgr::legacyMakeTypeface
++    */
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_REFDEFAULT)
++    static sk_sp<SkTypeface> MakeFromName(const char familyName[], SkFontStyle fontStyle);
++#endif
++
++    /** Return a new typeface given a file. If the file does not exist, or is
++        not a valid font file, returns nullptr.
++        Deprecated: call SkFontMgr::makeFromFile instead
++    */
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_REFDEFAULT)
++    static sk_sp<SkTypeface> MakeFromFile(const char path[], int index = 0);
++#endif
++
++    /** Return a new typeface given a stream and TTC index(pass 0 for none).
++        If the stream is not a valid font file, returns nullptr.
++        Ownership of the stream is transferred, so the caller must not reference it again.
++        Deprecated: call SkFontMgr::makeFromStream instead
++    */
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_REFDEFAULT)
++    static sk_sp<SkTypeface> MakeFromStream(std::unique_ptr<SkStreamAsset> stream, int index = 0);
++#endif
++
++    /** Return a new typeface given a SkData and TTC index (pass 0 for none).
++     *  If the data is null, or is not a valid font file, returns nullptr.
++     * Deprecated: call SkFontMgr::makeFromData instead
++     */
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_REFDEFAULT)
++    static sk_sp<SkTypeface> MakeFromData(sk_sp<SkData>, int index = 0);
++#endif
++
+     /** Return a new typeface based on this typeface but parameterized as specified in the
+         SkFontArguments. If the SkFontArguments does not supply an argument for a parameter
+         in the font then the value from this typeface will be used as the value for that
+@@ -145,6 +188,9 @@ public:
+         Does not affect ownership of SkStream.
+      */
+ 
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_REFDEFAULT)
++    static sk_sp<SkTypeface> MakeDeserialize(SkStream*);
++#endif
+     static sk_sp<SkTypeface> MakeDeserialize(SkStream*, sk_sp<SkFontMgr> lastResortMgr);
+ 
+     /**
+@@ -420,7 +466,21 @@ private:
+     friend class SkRandomTypeface;   // getAdvancedMetrics
+     friend class SkPDFFont;          // getAdvancedMetrics
+ 
+-    friend class SkFontPriv;         // getGlyphToUnicodeMap
++    /** Style specifies the intrinsic style attributes of a given typeface */
++    enum Style {
++        kNormal = 0,
++        kBold   = 0x01,
++        kItalic = 0x02,
++
++        // helpers
++        kBoldItalic = 0x03
++    };
++    static SkFontStyle FromOldStyle(Style oldStyle);
++    static SkTypeface* GetDefaultTypeface(Style style = SkTypeface::kNormal);
++
++    friend class SkFontPriv;         // GetDefaultTypeface
++    friend class SkPaintPriv;        // GetDefaultTypeface
++    friend class SkFont;             // getGlyphToUnicodeMap
+ 
+ private:
+     SkTypefaceID        fUniqueID;
+diff --git a/include/ports/BUILD.bazel b/include/ports/BUILD.bazel
+index 475ab938bc..5c9aef701b 100644
+--- a/include/ports/BUILD.bazel
++++ b/include/ports/BUILD.bazel
+@@ -43,17 +43,15 @@ skia_filegroup(
+     name = "fontmgr",
+     srcs = select_multi(
+         {
+-            "//bazel/common_config_settings:android_fontmgr": [":android_fontmgr_hdrs"],
+-            "//bazel/common_config_settings:custom_directory_fontmgr": [":directory_fontmgr_hdrs"],
+-            "//bazel/common_config_settings:custom_embedded_fontmgr": [":data_fontmgr_hdrs"],
+-            "//bazel/common_config_settings:custom_empty_fontmgr": [":empty_fontmgr_hdrs"],
+-            "//bazel/common_config_settings:fci_fontmgr": [":fci_fontmgr_hdrs"],
++            "//bazel/common_config_settings:uses_android_fontmgr": [":android_fontmgr_hdrs"],
++            "//bazel/common_config_settings:uses_custom_directory_fontmgr": [":directory_fontmgr_hdrs"],
++            "//bazel/common_config_settings:uses_custom_embedded_fontmgr": [":data_fontmgr_hdrs"],
++            "//bazel/common_config_settings:uses_custom_empty_fontmgr": [":empty_fontmgr_hdrs"],
++            "//bazel/common_config_settings:uses_fontconfig_fontmgr": [":fontconfig_fontmgr_hdrs"],
++            "//bazel/common_config_settings:uses_fci_fontmgr": [":fci_fontmgr_hdrs"],
+             # TODO(kjlubick, bungeman) fuchsia_fontmgr, fontmgr_mac_ct, fontmgr_win
+         },
+-    ) + select({
+-        "@platforms//os:linux": [":fontconfig_fontmgr_hdrs"],
+-        "//conditions:default": [],
+-    }),
++    ),
+ )
+ 
+ skia_filegroup(
+diff --git a/include/ports/SkFontConfigInterface.h b/include/ports/SkFontConfigInterface.h
+index f8fdca53f9..cd6adca5c4 100644
+--- a/include/ports/SkFontConfigInterface.h
++++ b/include/ports/SkFontConfigInterface.h
+@@ -98,6 +98,9 @@ public:
+      *  openStream() using the provided SkFontMgr, but derived classes may implement more
+      *  complex caching schemes.
+      */
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_REFDEFAULT)
++    virtual sk_sp<SkTypeface> makeTypeface(const FontIdentity& identity);
++#endif
+     virtual sk_sp<SkTypeface> makeTypeface(const FontIdentity& identity, sk_sp<SkFontMgr> mgr);
+ 
+     /**
+diff --git a/modules/canvaskit/compile.sh b/modules/canvaskit/compile.sh
+index 80d9ee05fe..530d3d3e9d 100755
+--- a/modules/canvaskit/compile.sh
++++ b/modules/canvaskit/compile.sh
+@@ -118,13 +118,16 @@ if [[ $@ == *no_font* ]]; then
+   ENABLE_FONT="false"
+   ENABLE_EMBEDDED_FONT="false"
+   GN_FONT+="skia_enable_fontmgr_custom_embedded=false skia_enable_fontmgr_custom_empty=false "
++  GN_FONT+="skia_fontmgr_factory=\":fontmgr_empty_factory\""
+ elif [[ $@ == *no_embedded_font* ]]; then
+   echo "Omitting the built-in font(s)"
+   ENABLE_EMBEDDED_FONT="false"
+   GN_FONT+="skia_enable_fontmgr_custom_embedded=true skia_enable_fontmgr_custom_empty=true "
++  GN_FONT+="skia_fontmgr_factory=\":fontmgr_custom_empty_factory\""
+ else
+   # Generate the font's binary file (which is covered by .gitignore)
+   GN_FONT+="skia_enable_fontmgr_custom_embedded=true skia_enable_fontmgr_custom_empty=false "
++  GN_FONT+="skia_fontmgr_factory=\":fontmgr_custom_embedded_factory\""
+ fi
+ 
+ if [[ $@ == *no_woff2* ]]; then
+diff --git a/modules/skottie/BUILD.bazel b/modules/skottie/BUILD.bazel
+index f48ca94c47..c97bcd9289 100644
+--- a/modules/skottie/BUILD.bazel
++++ b/modules/skottie/BUILD.bazel
+@@ -73,7 +73,7 @@ cc_binary_with_flags(
+     defines = ["GPU_ONLY"],
+     set_flags = {
+         "enable_gpu_test_utils": ["True"],
+-        "include_fontmgr": ["custom_empty_fontmgr"],
++        "fontmgr_factory": ["custom_directory_fontmgr_factory"],
+         "gpu_backend": ["gl_ganesh"],
+         "include_decoder": [
+             "jpeg_decode_codec",
+diff --git a/modules/skresources/src/SkResources.cpp b/modules/skresources/src/SkResources.cpp
+index 166639dfdc..31ac4f6162 100644
+--- a/modules/skresources/src/SkResources.cpp
++++ b/modules/skresources/src/SkResources.cpp
+@@ -330,6 +330,11 @@ sk_sp<SkTypeface> DataURIResourceProviderProxy::loadTypeface(const char name[],
+             return fFontMgr->makeFromData(std::move(data));
+         }
+     }
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_FACTORY)
++    if (auto data = decode_datauri("data:font/", url)) {
++        return SkTypeface::MakeFromData(std::move(data));
++    }
++#endif
+ 
+     return this->INHERITED::loadTypeface(name, url);
+ }
+diff --git a/public.bzl b/public.bzl
+index b376a27c7f..8b652fdc2c 100644
+--- a/public.bzl
++++ b/public.bzl
+@@ -479,6 +479,7 @@ BASE_SRCS_ALL = [
+     "src/core/SkFontMetricsPriv.cpp",
+     "src/core/SkFontMetricsPriv.h",
+     "src/core/SkFontMgr.cpp",
++    "src/core/SkFontMgrPriv.h",
+     "src/core/SkFontPriv.h",
+     "src/core/SkFontScanner.h",
+     "src/core/SkFontStream.cpp",
+@@ -1966,6 +1967,7 @@ PORTS_SRCS_UNIX = [
+     "src/ports/SkFontMgr_custom_embedded.cpp",
+     "src/ports/SkFontMgr_custom_empty.cpp",
+     "src/ports/SkFontMgr_custom.h",
++    "src/ports/SkFontMgr_fontconfig_factory.cpp",
+     "src/ports/SkFontMgr_fontconfig.cpp",
+     "src/ports/SkGlobalInitialization_default.cpp",
+     "src/ports/SkMemory_malloc.cpp",
+@@ -1986,6 +1988,7 @@ PORTS_SRCS_ANDROID = [
+     "src/ports/SkFontHost_FreeType_common.h",
+     "src/ports/SkFontHost_FreeType.cpp",
+     "src/ports/SkFontMgr_android.cpp",
++    "src/ports/SkFontMgr_android_factory.cpp",
+     "src/ports/SkFontMgr_android_parser.cpp",
+     "src/ports/SkFontMgr_android_parser.h",
+     "src/ports/SkFontMgr_custom.cpp",
+@@ -2004,6 +2007,7 @@ PORTS_SRCS_ANDROID = [
+ 
+ PORTS_SRCS_ANDROID_NO_FONT = [
+     "src/ports/SkDebug_android.cpp",
++    "src/ports/SkFontMgr_empty_factory.cpp",
+     "src/ports/SkGlobalInitialization_default.cpp",
+     "src/ports/SkMemory_malloc.cpp",
+     "src/ports/SkOSFile_posix.cpp",
+@@ -2020,6 +2024,7 @@ PORTS_SRCS_IOS = [
+     "src/ports/SkDebug_stdio.cpp",
+     "src/ports/SkFontMgr_custom.h",
+     "src/ports/SkFontMgr_mac_ct.cpp",
++    "src/ports/SkFontMgr_mac_ct_factory.cpp",
+     "src/ports/SkGlobalInitialization_default.cpp",
+     "src/ports/SkImageGeneratorCG.cpp",
+     "src/ports/SkMemory_malloc.cpp",
+@@ -2047,6 +2052,7 @@ PORTS_SRCS_FUCHSIA = [
+     "src/ports/SkFontHost_FreeType.cpp",
+     "src/ports/SkFontMgr_custom.cpp",
+     "src/ports/SkFontMgr_custom.h",
++    "src/ports/SkFontMgr_empty_factory.cpp",
+     "src/ports/SkFontMgr_fuchsia.cpp",
+     "src/ports/SkGlobalInitialization_default.cpp",
+     "src/ports/SkMemory_malloc.cpp",
+@@ -2072,6 +2078,7 @@ PORTS_SRCS_WASM = [
+     "src/ports/SkFontMgr_custom.h",
+     "src/ports/SkFontMgr_custom_embedded.cpp",
+     "src/ports/SkFontMgr_custom_empty.cpp",
++    "src/ports/SkFontMgr_empty_factory.cpp",
+     "src/ports/SkGlobalInitialization_default.cpp",
+     "src/ports/SkMemory_malloc.cpp",
+     "src/ports/SkOSFile_posix.cpp",
+diff --git a/src/core/BUILD.bazel b/src/core/BUILD.bazel
+index 762eccac53..8393c1f5c6 100644
+--- a/src/core/BUILD.bazel
++++ b/src/core/BUILD.bazel
+@@ -143,6 +143,7 @@ CORE_FILES = [
+     "SkFontMetricsPriv.cpp",
+     "SkFontMetricsPriv.h",
+     "SkFontMgr.cpp",
++    "SkFontMgrPriv.h",
+     "SkFontPriv.h",
+     "SkFontScanner.h",
+     "SkFontStream.cpp",
+@@ -449,6 +450,7 @@ skia_filegroup(
+         "SkFDot6.h",
+         "SkFontDescriptor.h",
+         "SkFontMetricsPriv.h",
++        "SkFontMgrPriv.h",
+         "SkFontPriv.h",
+         "SkFontScanner.h",
+         "SkFontStream.h",
+@@ -834,10 +836,16 @@ skia_cc_library(
+         "//include/sksl:core_hdrs",
+         "//include/utils:core_hdrs",
+     ],
++    defines = [
++        "SK_DISABLE_LEGACY_FONTMGR_FACTORY",
++        "SK_DISABLE_LEGACY_FONTMGR_REFDEFAULT",
++        "SK_DISABLE_LEGACY_DEFAULT_TYPEFACE",
++    ],
+     features = ["layering_check"],
+     local_defines = [
+         "SK_DISABLE_LEGACY_PNG_WRITEBUFFER",
+         "SK_DISABLE_LEGACY_IMAGE_READBUFFER",
++        "SK_DEFAULT_TYPEFACE_IS_EMPTY",
+     ],
+     textual_hdrs = [
+         "//src/opts:textual_hdrs",
+diff --git a/src/core/SkFontMgr.cpp b/src/core/SkFontMgr.cpp
+index dd5c420eea..1378cfb675 100644
+--- a/src/core/SkFontMgr.cpp
++++ b/src/core/SkFontMgr.cpp
+@@ -12,6 +12,7 @@
+ #include "include/core/SkStream.h"
+ #include "include/core/SkTypeface.h"
+ #include "include/core/SkTypes.h"
++#include "include/private/base/SkOnce.h"
+ 
+ #include <utility>
+ 
+@@ -156,6 +157,27 @@ sk_sp<SkFontMgr> SkFontMgr::RefEmpty() {
+     return singleton;
+ }
+ 
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_REFDEFAULT)
++// A global function pointer that's not declared, but can be overriden at startup by test tools.
++sk_sp<SkFontMgr> (*gSkFontMgr_DefaultFactory)() = nullptr;
++
++sk_sp<SkFontMgr> SkFontMgr::RefDefault() {
++    static SkOnce once;
++    static sk_sp<SkFontMgr> singleton;
++
++    once([]{
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_FACTORY)
++        sk_sp<SkFontMgr> fm = gSkFontMgr_DefaultFactory ? gSkFontMgr_DefaultFactory()
++                                                        : SkFontMgr::Factory();
++        singleton = fm ? std::move(fm) : RefEmpty();
++#else
++        singleton = RefEmpty();
++#endif
++    });
++    return singleton;
++}
++#endif  // SK_DISABLE_LEGACY_FONTMGR_REFDEFAULT
++
+ /**
+ * Width has the greatest priority.
+ * If the value of pattern.width is 5 (normal) or less,
+diff --git a/src/core/SkFontMgrPriv.h b/src/core/SkFontMgrPriv.h
+new file mode 100644
+index 0000000000..cbd7b4a1b5
+--- /dev/null
++++ b/src/core/SkFontMgrPriv.h
+@@ -0,0 +1,17 @@
++/*
++ * Copyright 2017 Google Inc.
++ *
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++#ifndef SkFontMgrPriv_DEFINED
++#define SkFontMgrPriv_DEFINED
++
++#include "include/core/SkFontMgr.h"
++
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_REFDEFAULT)
++extern sk_sp<SkFontMgr> (*gSkFontMgr_DefaultFactory)();
++
++#endif  // SkFontMgrPriv_DEFINED
++
++#endif
+diff --git a/src/core/SkPictureData.cpp b/src/core/SkPictureData.cpp
+index e44bacdd39..91cdf7fd78 100644
+--- a/src/core/SkPictureData.cpp
++++ b/src/core/SkPictureData.cpp
+@@ -148,11 +148,7 @@ void SkPictureData::WriteTypefaces(SkWStream* stream, const SkRefCntSet& rec,
+                 continue;
+             }
+         }
+-        // With the default serialization and deserialization behavior,
+-        // kIncludeDataIfLocal does not always work because there is no default
+-        // fontmgr to pass into SkTypeface::MakeDeserialize, so there is no
+-        // fontmgr to find a font given the descriptor only.
+-        tf->serialize(stream, SkTypeface::SerializeBehavior::kDoIncludeData);
++        array[i]->serialize(stream);
+     }
+ }
+ 
+@@ -351,12 +347,20 @@ bool SkPictureData::parseStreamTag(SkStream* stream,
+                     tf = procs.fTypefaceProc(&stream, sizeof(stream), procs.fTypefaceCtx);
+                 }
+                 else {
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_REFDEFAULT)
++                    tf = SkTypeface::MakeDeserialize(stream, SkFontMgr::RefDefault());
++#else
+                     tf = SkTypeface::MakeDeserialize(stream, nullptr);
++#endif
+                 }
+                 if (!tf) {    // failed to deserialize
+                     // fTFPlayback asserts it never has a null, so we plop in
+                     // a default here.
++#if !defined(SK_DISABLE_LEGACY_DEFAULT_TYPEFACE)
++                    tf = SkTypeface::MakeDefault();
++#else
+                     tf = SkTypeface::MakeEmpty();
++#endif
+                 }
+                 fTFPlayback[i] = std::move(tf);
+             }
+diff --git a/src/core/SkTypeface.cpp b/src/core/SkTypeface.cpp
+index 7faaf76088..78dba3ff28 100644
+--- a/src/core/SkTypeface.cpp
++++ b/src/core/SkTypeface.cpp
+@@ -49,6 +49,7 @@
+ 
+ #include <cstddef>
+ #include <cstring>
++#include <utility>
+ #include <vector>
+ 
+ using namespace skia_private;
+@@ -142,6 +143,38 @@ protected:
+ 
+ }  // namespace
+ 
++SkFontStyle SkTypeface::FromOldStyle(Style oldStyle) {
++    return SkFontStyle((oldStyle & SkTypeface::kBold) ? SkFontStyle::kBold_Weight
++                                                      : SkFontStyle::kNormal_Weight,
++                       SkFontStyle::kNormal_Width,
++                       (oldStyle & SkTypeface::kItalic) ? SkFontStyle::kItalic_Slant
++                                                        : SkFontStyle::kUpright_Slant);
++}
++
++SkTypeface* SkTypeface::GetDefaultTypeface(Style style) {
++#if !defined(SK_DEFAULT_TYPEFACE_IS_EMPTY) && !defined(SK_DISABLE_LEGACY_FONTMGR_REFDEFAULT)
++    static SkOnce once[4];
++    static sk_sp<SkTypeface> defaults[4];
++
++    SkASSERT((int)style < 4);
++    once[style]([style] {
++        sk_sp<SkFontMgr> fm(SkFontMgr::RefDefault());
++        auto t = fm->legacyMakeTypeface(nullptr, FromOldStyle(style));
++        defaults[style] = t ? t : SkEmptyTypeface::Make();
++    });
++    return defaults[style].get();
++#else
++    static sk_sp<SkTypeface> empty = SkEmptyTypeface::Make();
++    return empty.get();
++#endif  // !defined(SK_DEFAULT_TYPEFACE_IS_EMPTY)
++}
++
++#if !defined(SK_DISABLE_LEGACY_DEFAULT_TYPEFACE)
++sk_sp<SkTypeface> SkTypeface::MakeDefault() {
++    return sk_ref_sp(GetDefaultTypeface());
++}
++#endif
++
+ sk_sp<SkTypeface> SkTypeface::MakeEmpty() {
+     return SkEmptyTypeface::Make();
+ }
+@@ -187,6 +220,52 @@ namespace {
+ 
+ }  // namespace
+ 
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_REFDEFAULT)
++sk_sp<SkTypeface> SkTypeface::MakeFromName(const char name[],
++                                           SkFontStyle fontStyle) {
++    if (nullptr == name && (fontStyle.slant() == SkFontStyle::kItalic_Slant ||
++                            fontStyle.slant() == SkFontStyle::kUpright_Slant) &&
++                           (fontStyle.weight() == SkFontStyle::kBold_Weight ||
++                            fontStyle.weight() == SkFontStyle::kNormal_Weight)) {
++        return sk_ref_sp(GetDefaultTypeface(static_cast<SkTypeface::Style>(
++            (fontStyle.slant() == SkFontStyle::kItalic_Slant ? SkTypeface::kItalic :
++                                                               SkTypeface::kNormal) |
++            (fontStyle.weight() == SkFontStyle::kBold_Weight ? SkTypeface::kBold :
++                                                               SkTypeface::kNormal))));
++    }
++    return SkFontMgr::RefDefault()->legacyMakeTypeface(name, fontStyle);
++}
++
++sk_sp<SkTypeface> SkTypeface::MakeFromStream(std::unique_ptr<SkStreamAsset> stream, int index) {
++    if (!stream) {
++        return nullptr;
++    }
++    // TODO: Enable this while updating tests (FontHostStream), expectations, and nonativeFonts.
++#if 0
++    SkFontArguments args;
++    args.setCollectionIndex(index);
++    for (const DecoderProc& proc : *decoders()) {
++        sk_sp<SkTypeface> typeface = proc.makeFromStream(stream->duplicate(), args);
++        if (typeface) {
++            return typeface;
++        }
++    }
++#endif
++    return SkFontMgr::RefDefault()->makeFromStream(std::move(stream), index);
++}
++
++sk_sp<SkTypeface> SkTypeface::MakeFromData(sk_sp<SkData> data, int index) {
++    if (!data) {
++        return nullptr;
++    }
++    return SkFontMgr::RefDefault()->makeFromData(std::move(data), index);
++}
++
++sk_sp<SkTypeface> SkTypeface::MakeFromFile(const char path[], int index) {
++    return SkFontMgr::RefDefault()->makeFromFile(path, index);
++}
++#endif  // !defined(SK_DISABLE_LEGACY_FONTMGR_REFDEFAULT)
++
+ sk_sp<SkTypeface> SkTypeface::makeClone(const SkFontArguments& args) const {
+     return this->onMakeClone(args);
+ }
+@@ -238,6 +317,12 @@ sk_sp<SkData> SkTypeface::serialize(SerializeBehavior behavior) const {
+     return stream.detachAsData();
+ }
+ 
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_REFDEFAULT)
++sk_sp<SkTypeface> SkTypeface::MakeDeserialize(SkStream* stream) {
++    return MakeDeserialize(stream, SkFontMgr::RefDefault());
++}
++#endif
++
+ sk_sp<SkTypeface> SkTypeface::MakeDeserialize(SkStream* stream, sk_sp<SkFontMgr> lastResortMgr) {
+     SkFontDescriptor desc;
+     if (!SkFontDescriptor::Deserialize(stream, &desc)) {
+diff --git a/src/ports/BUILD.bazel b/src/ports/BUILD.bazel
+index 62c3548743..7feb97a851 100644
+--- a/src/ports/BUILD.bazel
++++ b/src/ports/BUILD.bazel
+@@ -49,6 +49,35 @@ skia_filegroup(
+     }),
+ )
+ 
++# There can only be one FontMgr Factory, but multiple different types of FontMgr compiled into
++# a single build.
++skia_filegroup(
++    name = "fontmgr_factory",
++    srcs = selects.with_or({
++        "//bazel/common_config_settings:android_fontmgr_factory": [
++            ":fontmgr_android_factory",
++        ],
++        "//bazel/common_config_settings:custom_directory_fontmgr_factory": [
++            ":fontmgr_custom_directory_factory",
++        ],
++        "//bazel/common_config_settings:custom_embedded_fontmgr_factory": [
++            ":fontmgr_custom_embedded_factory",
++        ],
++        "//bazel/common_config_settings:custom_empty_fontmgr_factory": [
++            ":fontmgr_custom_empty_factory",
++        ],
++        "//bazel/common_config_settings:fontconfig_fontmgr_factory": [
++            ":fontmgr_fontconfig_factory",
++        ],
++        "//bazel/common_config_settings:fci_fontmgr_factory": [
++            ":fontmgr_fci_factory",
++        ],
++        ("//bazel/common_config_settings:empty_fontmgr_factory", "//conditions:default"): [
++            ":fontmgr_empty_factory",
++        ],
++    }),
++)
++
+ skia_filegroup(
+     name = "fontmgr",
+     srcs = select_multi(
+@@ -57,12 +86,10 @@ skia_filegroup(
+             "//bazel/common_config_settings:custom_directory_fontmgr": [":fontmgr_custom_directory"],
+             "//bazel/common_config_settings:custom_embedded_fontmgr": [":fontmgr_custom_embedded"],
+             "//bazel/common_config_settings:custom_empty_fontmgr": [":fontmgr_custom_empty"],
++            "//bazel/common_config_settings:fontconfig_fontmgr": [":legacy_fontmgr_fontconfig"],
+             "//bazel/common_config_settings:fci_fontmgr": [":fontmgr_fci"],
+         },
+-    ) + select({
+-        "@platforms//os:linux": [":legacy_fontmgr_fontconfig"],
+-        "//conditions:default": [],
+-    }),
++    ),
+ )
+ 
+ skia_filegroup(
+@@ -81,6 +108,14 @@ skia_filegroup(
+     ],
+ )
+ 
++skia_filegroup(
++    name = "fontmgr_android_factory",
++    srcs = [
++        "SkFontMgr_android_factory.cpp",
++        ":fontmgr_android",
++    ],
++)
++
+ skia_filegroup(
+     name = "legacy_fontmgr_custom",
+     srcs = [
+@@ -89,6 +124,13 @@ skia_filegroup(
+     ],
+ )
+ 
++skia_filegroup(
++    name = "fontmgr_empty_factory",
++    srcs = [
++        "SkFontMgr_empty_factory.cpp",
++    ],
++)
++
+ skia_filegroup(
+     name = "fontmgr_custom_directory",
+     srcs = [
+@@ -97,6 +139,14 @@ skia_filegroup(
+     ],
+ )
+ 
++skia_filegroup(
++    name = "fontmgr_custom_directory_factory",
++    srcs = [
++        "SkFontMgr_custom_directory_factory.cpp",
++        ":fontmgr_custom_directory",
++    ],
++)
++
+ skia_filegroup(
+     name = "fontmgr_custom_embedded",
+     srcs = [
+@@ -105,6 +155,14 @@ skia_filegroup(
+     ],
+ )
+ 
++skia_filegroup(
++    name = "fontmgr_custom_embedded_factory",
++    srcs = [
++        "SkFontMgr_custom_embedded_factory.cpp",
++        ":fontmgr_custom_embedded",
++    ],
++)
++
+ skia_filegroup(
+     name = "fontmgr_custom_empty",
+     srcs = [
+@@ -113,6 +171,14 @@ skia_filegroup(
+     ],
+ )
+ 
++skia_filegroup(
++    name = "fontmgr_custom_empty_factory",
++    srcs = [
++        "SkFontMgr_custom_empty_factory.cpp",
++        ":fontmgr_custom_empty",
++    ],
++)
++
+ # Any setting that causes this skia_filegroup to be included also needs to have a dependency on
+ # fontconfig. See "deps" and "uses_fontconfig" at the bottom of this file.
+ skia_filegroup(
+@@ -123,6 +189,14 @@ skia_filegroup(
+     ],
+ )
+ 
++skia_filegroup(
++    name = "fontmgr_fontconfig_factory",
++    srcs = [
++        "SkFontMgr_fontconfig_factory.cpp",
++        ":legacy_fontmgr_fontconfig",
++    ],
++)
++
+ # TODO(bungeman, kjlubick) break this up into the direct and Interface part.
+ #  Alternatively, delete it.
+ # Any setting that causes this skia_filegroup to be included also needs to have a dependency on
+@@ -138,6 +212,14 @@ skia_filegroup(
+     ],
+ )
+ 
++skia_filegroup(
++    name = "fontmgr_fci_factory",
++    srcs = [
++        "SkFontMgr_FontConfigInterface_factory.cpp",
++        ":fontmgr_fci",
++    ],
++)
++
+ skia_filegroup(
+     name = "global_init",
+     srcs = ["SkGlobalInitialization_default.cpp"],
+@@ -190,6 +272,7 @@ skia_filegroup(
+     srcs = [
+         ":discardable_memory_pool",
+         ":fontmgr",
++        ":fontmgr_factory",
+         ":global_init",
+         ":load_dynamic_library",
+         ":malloc",
+@@ -215,10 +298,10 @@ skia_filegroup(
+         "@platforms//os:ios": ["SkOSFile_ios.h"],
+         "//conditions:default": [],
+     }) + select({
+-        "//bazel/common_config_settings:android_fontmgr": [":fontmgr_android_hdrs"],
++        "//bazel/common_config_settings:uses_android_fontmgr": [":fontmgr_android_hdrs"],
+         "//conditions:default": [],
+     }) + select({
+-        "//bazel/common_config_settings:fci_fontmgr": [
++        "//bazel/common_config_settings:uses_fci_fontmgr": [
+             "SkFontConfigInterface_direct.h",
+             "SkFontConfigTypeface.h",
+         ],
+@@ -236,22 +319,20 @@ skia_filegroup(
+ selects.config_setting_group(
+     name = "uses_freetype",
+     match_any = [
+-        "//bazel/common_config_settings:android_fontmgr",
+-        "//bazel/common_config_settings:custom_directory_fontmgr",
+-        "//bazel/common_config_settings:custom_embedded_fontmgr",
+-        "//bazel/common_config_settings:custom_empty_fontmgr",
+-        "//bazel/common_config_settings:fontconfig_fontmgr",
+-        "//bazel/common_config_settings:fci_fontmgr",
+-        "@platforms//os:linux",
++        "//bazel/common_config_settings:uses_android_fontmgr",
++        "//bazel/common_config_settings:uses_custom_directory_fontmgr",
++        "//bazel/common_config_settings:uses_custom_embedded_fontmgr",
++        "//bazel/common_config_settings:uses_custom_empty_fontmgr",
++        "//bazel/common_config_settings:uses_fontconfig_fontmgr",
++        "//bazel/common_config_settings:uses_fci_fontmgr",
+     ],
+ )
+ 
+ selects.config_setting_group(
+     name = "uses_fontconfig",
+     match_any = [
+-        "//bazel/common_config_settings:fontconfig_fontmgr",
+-        "//bazel/common_config_settings:fci_fontmgr",
+-        "@platforms//os:linux",
++        "//bazel/common_config_settings:uses_fontconfig_fontmgr",
++        "//bazel/common_config_settings:uses_fci_fontmgr",
+     ],
+ )
+ 
+@@ -280,7 +361,7 @@ skia_cc_deps(
+         ":uses_fontconfig": ["//bazel/external/fontconfig"],
+         "//conditions:default": [],
+     }) + select({
+-        "//bazel/common_config_settings:android_fontmgr": ["@expat"],
++        "//bazel/common_config_settings:uses_android_fontmgr": ["@expat"],
+         "//conditions:default": [],
+     }) + select({
+         "//bazel/common_config_settings:use_fontations_true": [
+diff --git a/src/ports/SkFontConfigInterface.cpp b/src/ports/SkFontConfigInterface.cpp
+index bd859ad0d7..860dc3ac76 100644
+--- a/src/ports/SkFontConfigInterface.cpp
++++ b/src/ports/SkFontConfigInterface.cpp
+@@ -32,6 +32,12 @@ void SkFontConfigInterface::SetGlobal(sk_sp<SkFontConfigInterface> fc) {
+     gFontConfigInterface = fc.release();
+ }
+ 
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_REFDEFAULT)
++sk_sp<SkTypeface> SkFontConfigInterface::makeTypeface(const FontIdentity& identity) {
++    return makeTypeface(identity, SkFontMgr::RefDefault());
++}
++#endif
++
+ sk_sp<SkTypeface> SkFontConfigInterface::makeTypeface(const FontIdentity& identity,
+                                                       sk_sp<SkFontMgr> mgr) {
+     return mgr->makeFromStream(std::unique_ptr<SkStreamAsset>(this->openStream(identity)),
+diff --git a/src/ports/SkFontMgr_FontConfigInterface_factory.cpp b/src/ports/SkFontMgr_FontConfigInterface_factory.cpp
+new file mode 100644
+index 0000000000..dd68827364
+--- /dev/null
++++ b/src/ports/SkFontMgr_FontConfigInterface_factory.cpp
+@@ -0,0 +1,20 @@
++/*
++ * Copyright 2008 Google Inc.
++ *
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include "include/core/SkFontMgr.h"
++#include "include/ports/SkFontConfigInterface.h"
++#include "include/ports/SkFontMgr_FontConfigInterface.h"
++
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_FACTORY)
++sk_sp<SkFontMgr> SkFontMgr::Factory() {
++    sk_sp<SkFontConfigInterface> fci(SkFontConfigInterface::RefGlobal());
++    if (!fci) {
++        return nullptr;
++    }
++    return SkFontMgr_New_FCI(std::move(fci));
++}
++#endif
+diff --git a/src/ports/SkFontMgr_android_factory.cpp b/src/ports/SkFontMgr_android_factory.cpp
+new file mode 100644
+index 0000000000..dc24b84cbd
+--- /dev/null
++++ b/src/ports/SkFontMgr_android_factory.cpp
+@@ -0,0 +1,15 @@
++/*
++ * Copyright 2015 Google Inc.
++ *
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include "include/core/SkFontMgr.h"
++#include "include/ports/SkFontMgr_android.h"
++
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_FACTORY)
++sk_sp<SkFontMgr> SkFontMgr::Factory() {
++    return SkFontMgr_New_Android(nullptr);
++}
++#endif
+diff --git a/src/ports/SkFontMgr_custom_directory_factory.cpp b/src/ports/SkFontMgr_custom_directory_factory.cpp
+new file mode 100644
+index 0000000000..0f926ad4c1
+--- /dev/null
++++ b/src/ports/SkFontMgr_custom_directory_factory.cpp
+@@ -0,0 +1,23 @@
++/*
++ * Copyright 2015 Google Inc.
++ *
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include "include/core/SkFontMgr.h"
++#include "include/ports/SkFontMgr_directory.h"
++
++#ifndef SK_FONT_FILE_PREFIX
++#  if defined(SK_BUILD_FOR_MAC) || defined(SK_BUILD_FOR_IOS)
++#    define SK_FONT_FILE_PREFIX "/System/Library/Fonts/"
++#  else
++#    define SK_FONT_FILE_PREFIX "/usr/share/fonts/"
++#  endif
++#endif
++
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_FACTORY)
++sk_sp<SkFontMgr> SkFontMgr::Factory() {
++    return SkFontMgr_New_Custom_Directory(SK_FONT_FILE_PREFIX);
++}
++#endif
+diff --git a/src/ports/SkFontMgr_custom_embedded_factory.cpp b/src/ports/SkFontMgr_custom_embedded_factory.cpp
+new file mode 100644
+index 0000000000..3179babc08
+--- /dev/null
++++ b/src/ports/SkFontMgr_custom_embedded_factory.cpp
+@@ -0,0 +1,19 @@
++/*
++ * Copyright 2015 Google Inc.
++ *
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include "include/core/SkFontMgr.h"
++
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_FACTORY)
++struct SkEmbeddedResource { const uint8_t* data; size_t size; };
++struct SkEmbeddedResourceHeader { const SkEmbeddedResource* entries; int count; };
++sk_sp<SkFontMgr> SkFontMgr_New_Custom_Embedded(const SkEmbeddedResourceHeader* header);
++
++extern "C" const SkEmbeddedResourceHeader SK_EMBEDDED_FONTS;
++sk_sp<SkFontMgr> SkFontMgr::Factory() {
++    return SkFontMgr_New_Custom_Embedded(&SK_EMBEDDED_FONTS);
++}
++#endif
+diff --git a/src/ports/SkFontMgr_custom_empty_factory.cpp b/src/ports/SkFontMgr_custom_empty_factory.cpp
+new file mode 100644
+index 0000000000..172fc45f88
+--- /dev/null
++++ b/src/ports/SkFontMgr_custom_empty_factory.cpp
+@@ -0,0 +1,15 @@
++/*
++ * Copyright 2016 Google Inc.
++ *
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include "include/core/SkFontMgr.h"
++#include "include/ports/SkFontMgr_empty.h"
++
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_FACTORY)
++sk_sp<SkFontMgr> SkFontMgr::Factory() {
++    return SkFontMgr_New_Custom_Empty();
++}
++#endif
+diff --git a/src/ports/SkFontMgr_empty_factory.cpp b/src/ports/SkFontMgr_empty_factory.cpp
+new file mode 100644
+index 0000000000..a4c4673597
+--- /dev/null
++++ b/src/ports/SkFontMgr_empty_factory.cpp
+@@ -0,0 +1,15 @@
++/*
++ * Copyright 2008 The Android Open Source Project
++ *
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include "include/core/SkFontMgr.h"
++
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_FACTORY)
++sk_sp<SkFontMgr> SkFontMgr::Factory() {
++    // Always return nullptr, an empty SkFontMgr will be used.
++    return nullptr;
++}
++#endif
+diff --git a/src/ports/SkFontMgr_fontconfig_factory.cpp b/src/ports/SkFontMgr_fontconfig_factory.cpp
+new file mode 100644
+index 0000000000..5bf3051ad9
+--- /dev/null
++++ b/src/ports/SkFontMgr_fontconfig_factory.cpp
+@@ -0,0 +1,16 @@
++/*
++ * Copyright 2015 Google Inc.
++ *
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include "include/core/SkFontMgr.h"
++#include "include/core/SkTypes.h"
++#include "include/ports/SkFontMgr_fontconfig.h"
++
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_FACTORY)
++sk_sp<SkFontMgr> SkFontMgr::Factory() {
++    return SkFontMgr_New_FontConfig(nullptr);
++}
++#endif
+diff --git a/src/ports/SkFontMgr_mac_ct_factory.cpp b/src/ports/SkFontMgr_mac_ct_factory.cpp
+new file mode 100644
+index 0000000000..bd4fc41dec
+--- /dev/null
++++ b/src/ports/SkFontMgr_mac_ct_factory.cpp
+@@ -0,0 +1,20 @@
++/*
++ * Copyright 2017 Google Inc.
++ *
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include "include/core/SkTypes.h"
++#if defined(SK_BUILD_FOR_MAC) || defined(SK_BUILD_FOR_IOS)
++
++#include "include/core/SkFontMgr.h"
++#include "include/ports/SkFontMgr_mac_ct.h"
++
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_FACTORY)
++sk_sp<SkFontMgr> SkFontMgr::Factory() {
++    return SkFontMgr_New_CoreText(nullptr);
++}
++#endif
++
++#endif//defined(SK_BUILD_FOR_MAC) || defined(SK_BUILD_FOR_IOS)
+diff --git a/src/ports/SkFontMgr_win_dw_factory.cpp b/src/ports/SkFontMgr_win_dw_factory.cpp
+new file mode 100644
+index 0000000000..9dd952ac93
+--- /dev/null
++++ b/src/ports/SkFontMgr_win_dw_factory.cpp
+@@ -0,0 +1,20 @@
++/*
++ * Copyright 2015 Google Inc.
++ *
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++#include "include/core/SkTypes.h"
++#if defined(SK_BUILD_FOR_WIN)  // And !SKIA_GDI?
++
++#include "include/core/SkFontMgr.h"
++#include "include/ports/SkTypeface_win.h"
++
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_FACTORY)
++sk_sp<SkFontMgr> SkFontMgr::Factory() {
++    return SkFontMgr_New_DirectWrite();
++}
++#endif
++
++#endif//defined(SK_BUILD_FOR_WIN)
+diff --git a/tests/MultiPictureDocumentTest.cpp b/tests/MultiPictureDocumentTest.cpp
+index a968c1ba48..e4bce003fa 100644
+--- a/tests/MultiPictureDocumentTest.cpp
++++ b/tests/MultiPictureDocumentTest.cpp
+@@ -174,8 +174,7 @@ DEF_TEST(SkMultiPictureDocument_Serialize_and_deserialize, reporter) {
+         auto surf = SkSurfaces::Raster(info);
+         surf->getCanvas()->drawPicture(frame.fPicture);
+         auto img = surf->makeImageSnapshot();
+-        REPORTER_ASSERT(reporter, ToolUtils::equal_pixels(img.get(), expectedImages[i].get()),
+-                        "Frame %d is wrong", i);
++        REPORTER_ASSERT(reporter, ToolUtils::equal_pixels(img.get(), expectedImages[i].get()));
+ 
+         i++;
+     }
+diff --git a/tests/SerializationTest.cpp b/tests/SerializationTest.cpp
+index 95c683befa..6fd549b3d1 100644
+--- a/tests/SerializationTest.cpp
++++ b/tests/SerializationTest.cpp
+@@ -816,18 +816,7 @@ DEF_TEST(Serialization, reporter) {
+         sk_sp<SkImage> img0 = render(*pict);
+         sk_sp<SkImage> img1 = render(*readPict);
+         if (img0 && img1) {
+-            bool ok = ToolUtils::equal_pixels(img0.get(), img1.get());
+-            REPORTER_ASSERT(reporter, ok, "before and after image did not match");
+-            if (!ok) {
+-                auto left = SkFILEWStream("before_serialize.png");
+-                sk_sp<SkData> d = SkPngEncoder::Encode(nullptr, img0.get(), {});
+-                left.write(d->data(), d->size());
+-                left.fsync();
+-                auto right = SkFILEWStream("after_serialize.png");
+-                d = SkPngEncoder::Encode(nullptr, img1.get(), {});
+-                right.write(d->data(), d->size());
+-                right.fsync();
+-            }
++            REPORTER_ASSERT(reporter, ToolUtils::equal_pixels(img0.get(), img1.get()));
+         }
+     }
+ 
+diff --git a/tools/ToolUtils.cpp b/tools/ToolUtils.cpp
+index 5094eb5aea..f03b97bb80 100644
+--- a/tools/ToolUtils.cpp
++++ b/tools/ToolUtils.cpp
+@@ -452,14 +452,7 @@ void copy_to_g8(SkBitmap* dst, const SkBitmap& src) {
+ //////////////////////////////////////////////////////////////////////////////////////////////
+ 
+ bool equal_pixels(const SkPixmap& a, const SkPixmap& b) {
+-    if (a.width() != b.width() || a.height() != b.height()) {
+-        SkDebugf("[ToolUtils::equal_pixels] Dimensions do not match (%d x %d) != (%d x %d)\n",
+-                 a.width(), a.height(), b.width(), b.height());
+-    }
+-
+-    if (a.colorType() != b.colorType()) {
+-        SkDebugf("[ToolUtils::equal_pixels] colorType does not match %d != %d\n",
+-                 (int) a.colorType(), (int) b.colorType());
++    if (a.width() != b.width() || a.height() != b.height() || a.colorType() != b.colorType()) {
+         return false;
+     }
+ 
+@@ -467,7 +460,6 @@ bool equal_pixels(const SkPixmap& a, const SkPixmap& b) {
+         const char* aptr = (const char*)a.addr(0, y);
+         const char* bptr = (const char*)b.addr(0, y);
+         if (0 != memcmp(aptr, bptr, a.width() * a.info().bytesPerPixel())) {
+-            SkDebugf("[ToolUtils::equal_pixels] row %d does not match byte for byte\n", y);
+             return false;
+         }
+     }
+diff --git a/tools/fonts/FontToolUtils.cpp b/tools/fonts/FontToolUtils.cpp
+index 4c81ab1171..9958549eb9 100644
+--- a/tools/fonts/FontToolUtils.cpp
++++ b/tools/fonts/FontToolUtils.cpp
+@@ -21,6 +21,7 @@
+ #include "include/private/base/SkMutex.h"
+ #include "include/utils/SkCustomTypeface.h"
+ #include "src/base/SkUTF.h"
++#include "src/core/SkFontMgrPriv.h"
+ #include "src/core/SkOSFile.h"
+ #include "tools/Resources.h"
+ #include "tools/flags/CommandLineFlags.h"
+@@ -274,4 +275,17 @@ SkFont DefaultFont() {
+     return SkFont(DefaultTypeface(), 12);
+ }
+ 
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_FACTORY)
++void SetDefaultFontMgr() {
++    if (!FLAGS_nativeFonts) {
++        gSkFontMgr_DefaultFactory = &ToolUtils::MakePortableFontMgr;
++    }
++#if defined(SK_BUILD_FOR_WIN) && defined(SK_FONTMGR_GDI_AVAILABLE)
++    if (FLAGS_gdi) {
++        gSkFontMgr_DefaultFactory = &SkFontMgr_New_GDI;
++    }
++#endif
++}
++#endif
++
+ }  // namespace ToolUtils
+diff --git a/tools/fonts/FontToolUtils.h b/tools/fonts/FontToolUtils.h
+index 11ecf8a38c..1e14d1151f 100644
+--- a/tools/fonts/FontToolUtils.h
++++ b/tools/fonts/FontToolUtils.h
+@@ -75,6 +75,11 @@ sk_sp<SkTypeface> CreateTypefaceFromResource(const char* resource, int ttcIndex
+ // This returns a font using DefaultTypeface()
+ SkFont DefaultFont();
+ 
++#if !defined(SK_DISABLE_LEGACY_FONTMGR_FACTORY)
++// Temporary hack to set the global for non-migrated uses of SkFontMgr::RefDefault()
++void SetDefaultFontMgr();
++#endif
++
+ }  // namespace ToolUtils
+ 
+ #endif
+diff --git a/tools/viewer/BUILD.bazel b/tools/viewer/BUILD.bazel
+index 6464c85e32..1a29f2952f 100644
+--- a/tools/viewer/BUILD.bazel
++++ b/tools/viewer/BUILD.bazel
+@@ -52,7 +52,9 @@ cc_binary_with_flags(
+         "with_gl_standard": [
+             "gl_standard",
+         ],
+-        "include_fontmgr": ["custom_directory_fontmgr"],
++        "fontmgr_factory": [
++            "custom_directory_fontmgr_factory",
++        ],
+         "enable_gpu_test_utils": ["True"],
+         "enable_svg_canvas": ["True"],
+         "enable_sksl_tracing": ["True"],

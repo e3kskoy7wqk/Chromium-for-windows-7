@@ -1,0 +1,18 @@
+commit 0aedffef72918de0dc8025b58423a7faaf1ebe14
+Author: John Doe <jdoe@email.com>
+Date:   Sun Feb 11 23:46:20 2024 +0800
+
+    Replace SkFontMgr::RefDefault with platform-specific calls    2023-12-08 05:24:40    a6166e825abc9b0b0359115fc9d95de4bbcd5b9c
+
+diff --git a/skia/BUILD.gn b/skia/BUILD.gn
+index af458f346a021..0784a0ced0918 100644
+--- a/skia/BUILD.gn
++++ b/skia/BUILD.gn
+@@ -81,7 +81,6 @@ config("skia_config") {
+     "SK_SLUG_DISABLE_LEGACY_DESERIALIZE",
+     "SK_DISABLE_LEGACY_VK_GRDIRECTCONTEXT_FACTORIES",
+     "SK_DEFAULT_TYPEFACE_IS_EMPTY",
+-    "SK_DISABLE_LEGACY_DEFAULT_TYPEFACE",
+     "SK_DISABLE_LEGACY_VULKAN_BACKENDSEMAPHORE",
+     "SK_DISABLE_LEGACY_CREATE_CHARACTERIZATION",
+   ]

@@ -1,0 +1,167 @@
+commit ee7b1d78ab7a3ec408cc792ca6dfd8604ba6066f
+Author: John Doe <jdoe@email.com>
+Date:   Mon Feb 12 15:54:05 2024 +0800
+
+    win7dep: Remove Win7 support from base debug+test    2022-12-19 23:46:11    48aaf3cde8001b025b42f4485b5de2922ac212ab
+
+diff --git a/base/debug/invalid_access_win.cc b/base/debug/invalid_access_win.cc
+index dc0d54bbc67ec..246e8e4775a43 100644
+--- a/base/debug/invalid_access_win.cc
++++ b/base/debug/invalid_access_win.cc
+@@ -9,6 +9,7 @@
+ #include <windows.h>
+ 
+ #include "base/check.h"
++#include "base/win/windows_version.h"
+ #include "build/build_config.h"
+ 
+ namespace base {
+@@ -41,10 +42,21 @@ void IndirectCall(FuncType* func) {
+   (*func)();
+ }
+ 
++void CreateSyntheticHeapCorruption() {
++  EXCEPTION_RECORD record = {};
++  record.ExceptionCode = STATUS_HEAP_CORRUPTION;
++  RaiseFailFastException(&record, nullptr,
++                         FAIL_FAST_GENERATE_EXCEPTION_ADDRESS);
++}
++
+ }  // namespace
+ 
+ void TerminateWithHeapCorruption() {
+   __try {
++    // Pre-Windows 10, it's hard to trigger a heap corruption fast fail, so
++    // artificially create one instead.
++    if (base::win::GetVersion() < base::win::Version::WIN10)
++      CreateSyntheticHeapCorruption();
+     HANDLE heap = ::HeapCreate(0, 0, 0);
+     CHECK(heap);
+     CHECK(HeapSetInformation(heap, HeapEnableTerminationOnCorruption, nullptr,
+diff --git a/base/test/launcher/test_launcher.cc b/base/test/launcher/test_launcher.cc
+index 6ea8e086aa67a..26b4b53c1fa49 100644
+--- a/base/test/launcher/test_launcher.cc
++++ b/base/test/launcher/test_launcher.cc
+@@ -80,6 +80,7 @@
+ 
+ #if BUILDFLAG(IS_WIN)
+ #include "base/strings/string_util_win.h"
++#include "base/win/windows_version.h"
+ 
+ #include <windows.h>
+ 
+@@ -103,8 +104,7 @@
+ 
+ namespace base {
+ 
+-// See
+-// https://groups.google.com/a/chromium.org/d/msg/chromium-dev/nkdTP7sstSc/uT3FaE_sgkAJ
++// See https://groups.google.com/a/chromium.org/d/msg/chromium-dev/nkdTP7sstSc/uT3FaE_sgkAJ .
+ using ::operator<<;
+ 
+ // The environment variable name for the total number of test shards.
+@@ -434,6 +434,13 @@ int LaunchChildTestProcessWithOptions(const CommandLine& command_line,
+ 
+     DWORD job_flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+ 
++    // Allow break-away from job since sandbox and few other places rely on it
++    // on Windows versions prior to Windows 8 (which supports nested jobs).
++    if (win::GetVersion() < win::Version::WIN8 &&
++        flags & TestLauncher::ALLOW_BREAKAWAY_FROM_JOB) {
++      job_flags |= JOB_OBJECT_LIMIT_BREAKAWAY_OK;
++    }
++
+     if (!SetJobObjectLimitFlags(job_handle.get(), job_flags)) {
+       LOG(ERROR) << "Could not SetJobObjectLimitFlags.";
+       return -1;
+diff --git a/base/test/launcher/test_launcher_unittest.cc b/base/test/launcher/test_launcher_unittest.cc
+index 1d58a3e43962f..3ec6c6297b18a 100644
+--- a/base/test/launcher/test_launcher_unittest.cc
++++ b/base/test/launcher/test_launcher_unittest.cc
+@@ -33,6 +33,10 @@
+ #include "testing/multiprocess_func_list.h"
+ #include "third_party/abseil-cpp/absl/types/optional.h"
+ 
++#if BUILDFLAG(IS_WIN)
++#include "base/win/windows_version.h"
++#endif
++
+ namespace base {
+ namespace {
+ 
+@@ -1206,6 +1210,13 @@ TEST_F(UnitTestLauncherDelegateTester, RunMockTests) {
+   command_line.AppendSwitchPath("test-launcher-summary-output", path);
+   command_line.AppendSwitch("gtest_also_run_disabled_tests");
+   command_line.AppendSwitchASCII("test-launcher-retry-limit", "0");
++#if BUILDFLAG(IS_WIN)
++  // In Windows versions prior to Windows 8, nested job objects are
++  // not allowed and cause this test to fail.
++  if (win::GetVersion() < win::Version::WIN8) {
++    command_line.AppendSwitch(kDontUseJobObjectFlag);
++  }
++#endif  // BUILDFLAG(IS_WIN)
+ 
+   std::string output;
+   GetAppOutputAndError(command_line, &output);
+@@ -1375,6 +1386,13 @@ TEST_F(UnitTestLauncherDelegateTester, LeakedChildProcess) {
+   command_line.AppendSwitchPath("test-launcher-summary-output", path);
+   command_line.AppendSwitch("gtest_also_run_disabled_tests");
+   command_line.AppendSwitchASCII("test-launcher-retry-limit", "0");
++#if BUILDFLAG(IS_WIN)
++  // In Windows versions prior to Windows 8, nested job objects are
++  // not allowed and cause this test to fail.
++  if (win::GetVersion() < win::Version::WIN8) {
++    command_line.AppendSwitch(kDontUseJobObjectFlag);
++  }
++#endif  // BUILDFLAG(IS_WIN)
+ 
+   std::string output;
+   int exit_code = 0;
+diff --git a/base/test/launcher/unit_test_launcher.cc b/base/test/launcher/unit_test_launcher.cc
+index b1a1f9fefd8e2..71d9333c523fb 100644
+--- a/base/test/launcher/unit_test_launcher.cc
++++ b/base/test/launcher/unit_test_launcher.cc
+@@ -129,6 +129,9 @@ void PrintUsage() {
+       "  --test-launcher-shard-index=N\n"
+       "    Sets the shard index to run to N (from 0 to TOTAL - 1).\n"
+       "\n"
++      "  --dont-use-job-objects\n"
++      "    Avoids using job objects in Windows.\n"
++      "\n"
+       "  --test-launcher-print-temp-leaks\n"
+       "    Prints information about leaked files and/or directories in\n"
+       "    child process's temporary directories (Windows and macOS).\n");
+@@ -212,6 +215,10 @@ int RunTestSuite(RunTestSuiteCallback run_test_suite,
+ #if BUILDFLAG(IS_POSIX)
+   FileDescriptorWatcher file_descriptor_watcher(executor.task_runner());
+ #endif
++  use_job_objects =
++      use_job_objects &&
++      !CommandLine::ForCurrentProcess()->HasSwitch(kDontUseJobObjectFlag);
++
+   DefaultUnitTestPlatformDelegate platform_delegate;
+   UnitTestLauncherDelegate delegate(&platform_delegate, batch_limit,
+                                     use_job_objects, timeout_callback);
+@@ -279,6 +286,9 @@ void InitGoogleTestWChar(int* argc, wchar_t** argv) {
+ 
+ }  // namespace
+ 
++// Flag to avoid using job objects
++const char kDontUseJobObjectFlag[] = "dont-use-job-objects";
++
+ MergeTestFilterSwitchHandler::~MergeTestFilterSwitchHandler() = default;
+ void MergeTestFilterSwitchHandler::ResolveDuplicate(
+     base::StringPiece key,
+diff --git a/base/test/launcher/unit_test_launcher.h b/base/test/launcher/unit_test_launcher.h
+index b8d052cbde21b..ea658a5e4a857 100644
+--- a/base/test/launcher/unit_test_launcher.h
++++ b/base/test/launcher/unit_test_launcher.h
+@@ -23,6 +23,8 @@
+ 
+ namespace base {
+ 
++extern const char kDontUseJobObjectFlag[];
++
+ // Callback that runs a test suite and returns exit code.
+ using RunTestSuiteCallback = OnceCallback<int(void)>;
+ 

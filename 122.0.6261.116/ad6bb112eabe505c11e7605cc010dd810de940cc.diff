@@ -1,0 +1,726 @@
+commit ad6bb112eabe505c11e7605cc010dd810de940cc
+Author: John Doe <jdoe@email.com>
+Date:   Mon Feb 12 14:44:27 2024 +0800
+
+    win7dep: Remove win7/8 code from device/    2023-01-04 22:33:10    09c0b0212ff27c0377ed5eff8cb5156fb01a6c2b
+
+diff --git a/device/bluetooth/bluetooth_adapter_factory.cc b/device/bluetooth/bluetooth_adapter_factory.cc
+index cf3e7bf3a29b5..5805afc8a4529 100644
+--- a/device/bluetooth/bluetooth_adapter_factory.cc
++++ b/device/bluetooth/bluetooth_adapter_factory.cc
+@@ -4,7 +4,6 @@
+ 
+ #include "device/bluetooth/bluetooth_adapter_factory.h"
+ 
+-#include <memory>
+ #include <utility>
+ #include <vector>
+ 
+@@ -21,6 +20,7 @@
+ #include "base/mac/mac_util.h"
+ #endif
+ #if BUILDFLAG(IS_WIN)
++#include "base/win/windows_version.h"
+ #include "device/bluetooth/bluetooth_adapter_win.h"
+ #endif
+ 
+@@ -56,8 +56,13 @@ bool BluetoothAdapterFactory::IsLowEnergySupported() {
+   }
+ 
+ #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_WIN)
++    BUILDFLAG(IS_APPLE)
+   return true;
++#elif BUILDFLAG(IS_WIN)
++  // Windows 8 supports Low Energy GATT operations but it does not support
++  // scanning, initiating connections and GATT Server. To keep the API
++  // consistent we consider Windows 8 as lacking Low Energy support.
++  return base::win::GetVersion() >= base::win::Version::WIN10;
+ #else
+   return false;
+ #endif
+@@ -88,6 +93,12 @@ void BluetoothAdapterFactory::GetClassicAdapter(AdapterCallback callback) {
+ #if BUILDFLAG(IS_WIN)
+   DCHECK(IsBluetoothSupported());
+ 
++  if (base::win::GetVersion() < base::win::Version::WIN10) {
++    // Prior to Win10, the default adapter will support Bluetooth classic.
++    GetAdapter(std::move(callback));
++    return;
++  }
++
+   if (!classic_adapter_) {
+     classic_adapter_callbacks_.push_back(std::move(callback));
+ 
+diff --git a/device/bluetooth/bluetooth_adapter_win.cc b/device/bluetooth/bluetooth_adapter_win.cc
+index 9f7aad32f92b0..d12584a630014 100644
+--- a/device/bluetooth/bluetooth_adapter_win.cc
++++ b/device/bluetooth/bluetooth_adapter_win.cc
+@@ -18,6 +18,7 @@
+ #include "base/stl_util.h"
+ #include "base/task/sequenced_task_runner.h"
+ #include "base/task/single_thread_task_runner.h"
++#include "base/win/windows_version.h"
+ #include "device/base/features.h"
+ #include "device/bluetooth/bluetooth_adapter_winrt.h"
+ #include "device/bluetooth/bluetooth_classic_win.h"
+@@ -51,10 +52,16 @@ scoped_refptr<BluetoothAdapter> BluetoothAdapterWin::CreateClassicAdapter() {
+ 
+ // static
+ bool BluetoothAdapterWin::UseNewBLEWinImplementation() {
+-  return base::FeatureList::IsEnabled(kNewBLEWinImplementation);
++  return base::FeatureList::IsEnabled(kNewBLEWinImplementation) &&
++         base::win::GetVersion() >= base::win::Version::WIN10;
+ }
+ 
+-BluetoothAdapterWin::BluetoothAdapterWin() = default;
++BluetoothAdapterWin::BluetoothAdapterWin()
++    : BluetoothAdapter(),
++      initialized_(false),
++      powered_(false),
++      discovery_status_(NOT_DISCOVERING),
++      force_update_device_for_test_(false) {}
+ 
+ BluetoothAdapterWin::~BluetoothAdapterWin() {
+   if (task_manager_.get())
+diff --git a/device/bluetooth/bluetooth_adapter_win.h b/device/bluetooth/bluetooth_adapter_win.h
+index 491a001a41201..ea5c8c2e8d469 100644
+--- a/device/bluetooth/bluetooth_adapter_win.h
++++ b/device/bluetooth/bluetooth_adapter_win.h
+@@ -138,9 +138,9 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterWin
+   base::OnceClosure init_callback_;
+   std::string address_;
+   std::string name_;
+-  bool initialized_ = false;
+-  bool powered_ = false;
+-  DiscoveryStatus discovery_status_ = NOT_DISCOVERING;
++  bool initialized_;
++  bool powered_;
++  DiscoveryStatus discovery_status_;
+   std::unordered_set<std::string> discovered_devices_;
+ 
+   DiscoverySessionResultCallback discovery_changed_callback_;
+@@ -151,7 +151,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterWin
+   base::ThreadChecker thread_checker_;
+ 
+   // Flag indicating a device update must be forced in DevicesPolled.
+-  bool force_update_device_for_test_ = false;
++  bool force_update_device_for_test_;
+ 
+   // NOTE: This should remain the last member so it'll be destroyed and
+   // invalidate its weak pointers before any other members are destroyed.
+diff --git a/device/bluetooth/bluetooth_low_energy_win.cc b/device/bluetooth/bluetooth_low_energy_win.cc
+index fb640e4e46bea..7a54a2283f705 100644
+--- a/device/bluetooth/bluetooth_low_energy_win.cc
++++ b/device/bluetooth/bluetooth_low_energy_win.cc
+@@ -5,7 +5,6 @@
+ #include "device/bluetooth/bluetooth_low_energy_win.h"
+ 
+ #include <memory>
+-#include <string>
+ #include <utility>
+ 
+ #include "base/files/file.h"
+@@ -15,6 +14,7 @@
+ #include "base/strings/string_util.h"
+ #include "base/strings/sys_string_conversions.h"
+ #include "base/win/scoped_handle.h"
++#include "base/win/windows_version.h"
+ #include "third_party/re2/src/re2/re2.h"
+ 
+ namespace {
+@@ -24,6 +24,8 @@ using device::win::DevicePropertyValue;
+ using device::win::BluetoothLowEnergyDeviceInfo;
+ using device::win::BluetoothLowEnergyServiceInfo;
+ 
++const char kPlatformNotSupported[] =
++    "Bluetooth Low energy is only supported on Windows 8 and later.";
+ const char kDeviceEnumError[] = "Error enumerating Bluetooth LE devices.";
+ const char kDeviceInfoError[] =
+     "Error retrieving Bluetooth LE device information.";
+@@ -617,7 +619,8 @@ DevicePropertyValue::DevicePropertyValue(DEVPROPTYPE property_type,
+       value_(std::move(value)),
+       value_size_(value_size) {}
+ 
+-DevicePropertyValue::~DevicePropertyValue() = default;
++DevicePropertyValue::~DevicePropertyValue() {
++}
+ 
+ uint32_t DevicePropertyValue::AsUint32() const {
+   CHECK_EQ(property_type_, static_cast<DEVPROPTYPE>(DEVPROP_TYPE_UINT32));
+@@ -625,11 +628,14 @@ uint32_t DevicePropertyValue::AsUint32() const {
+   return *reinterpret_cast<uint32_t*>(value_.get());
+ }
+ 
+-BluetoothLowEnergyServiceInfo::BluetoothLowEnergyServiceInfo() = default;
++BluetoothLowEnergyServiceInfo::BluetoothLowEnergyServiceInfo() {
++}
+ 
+-BluetoothLowEnergyServiceInfo::~BluetoothLowEnergyServiceInfo() = default;
++BluetoothLowEnergyServiceInfo::~BluetoothLowEnergyServiceInfo() {
++}
+ 
+-BluetoothLowEnergyDeviceInfo::BluetoothLowEnergyDeviceInfo() {
++BluetoothLowEnergyDeviceInfo::BluetoothLowEnergyDeviceInfo()
++    : visible(false), authenticated(false), connected(false) {
+   address.ullLong = BLUETOOTH_NULL_ADDRESS;
+ }
+ 
+@@ -643,12 +649,21 @@ bool ExtractBluetoothAddressFromDeviceInstanceIdForTesting(
+   return ExtractBluetoothAddressFromDeviceInstanceId(instance_id, btha, error);
+ }
+ 
+-BluetoothLowEnergyWrapper::BluetoothLowEnergyWrapper() = default;
+-BluetoothLowEnergyWrapper::~BluetoothLowEnergyWrapper() = default;
++BluetoothLowEnergyWrapper::BluetoothLowEnergyWrapper() {}
++BluetoothLowEnergyWrapper::~BluetoothLowEnergyWrapper() {}
++
++bool BluetoothLowEnergyWrapper::IsBluetoothLowEnergySupported() {
++  return base::win::GetVersion() >= base::win::Version::WIN8;
++}
+ 
+ bool BluetoothLowEnergyWrapper::EnumerateKnownBluetoothLowEnergyDevices(
+     std::vector<std::unique_ptr<BluetoothLowEnergyDeviceInfo>>* devices,
+     std::string* error) {
++  if (!IsBluetoothLowEnergySupported()) {
++    *error = kPlatformNotSupported;
++    return false;
++  }
++
+   return EnumerateKnownBLEOrBLEGattServiceDevices(
+       GUID_BLUETOOTHLE_DEVICE_INTERFACE, devices, error);
+ }
+@@ -657,6 +672,11 @@ bool BluetoothLowEnergyWrapper::
+     EnumerateKnownBluetoothLowEnergyGattServiceDevices(
+         std::vector<std::unique_ptr<BluetoothLowEnergyDeviceInfo>>* devices,
+         std::string* error) {
++  if (!IsBluetoothLowEnergySupported()) {
++    *error = kPlatformNotSupported;
++    return false;
++  }
++
+   return EnumerateKnownBLEOrBLEGattServiceDevices(
+       GUID_BLUETOOTH_GATT_SERVICE_DEVICE_INTERFACE, devices, error);
+ }
+@@ -665,6 +685,11 @@ bool BluetoothLowEnergyWrapper::EnumerateKnownBluetoothLowEnergyServices(
+     const base::FilePath& device_path,
+     std::vector<std::unique_ptr<BluetoothLowEnergyServiceInfo>>* services,
+     std::string* error) {
++  if (!IsBluetoothLowEnergySupported()) {
++    *error = kPlatformNotSupported;
++    return false;
++  }
++
+   return CollectBluetoothLowEnergyDeviceServices(device_path, services, error);
+ }
+ 
+diff --git a/device/bluetooth/bluetooth_low_energy_win.h b/device/bluetooth/bluetooth_low_energy_win.h
+index f9280a683feb1..74d9449ee4e27 100644
+--- a/device/bluetooth/bluetooth_low_energy_win.h
++++ b/device/bluetooth/bluetooth_low_energy_win.h
+@@ -110,9 +110,9 @@ struct DEVICE_BLUETOOTH_EXPORT BluetoothLowEnergyDeviceInfo {
+   std::string id;
+   absl::optional<std::string> friendly_name;
+   BLUETOOTH_ADDRESS address;
+-  bool visible = false;
+-  bool authenticated = false;
+-  bool connected = false;
++  bool visible;
++  bool authenticated;
++  bool connected;
+ };
+ 
+ bool DEVICE_BLUETOOTH_EXPORT
+@@ -128,6 +128,9 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothLowEnergyWrapper {
+   BluetoothLowEnergyWrapper();
+   virtual ~BluetoothLowEnergyWrapper();
+ 
++  // Returns true only on Windows platforms supporting Bluetooth Low Energy.
++  virtual bool IsBluetoothLowEnergySupported();
++
+   // Enumerates the list of known (i.e. already paired) Bluetooth LE devices on
+   // this machine. In case of error, returns false and sets |error| with an
+   // error message describing the problem.
+diff --git a/device/bluetooth/bluetooth_low_energy_win_fake.cc b/device/bluetooth/bluetooth_low_energy_win_fake.cc
+index f55b291d8195f..f944745892cd4 100644
+--- a/device/bluetooth/bluetooth_low_energy_win_fake.cc
++++ b/device/bluetooth/bluetooth_low_energy_win_fake.cc
+@@ -5,16 +5,19 @@
+ #include "device/bluetooth/bluetooth_low_energy_win_fake.h"
+ 
+ #include <memory>
+-#include <string>
+-#include <utility>
+-#include <vector>
+ 
+ #include "base/check_op.h"
+ #include "base/memory/ptr_util.h"
+ #include "base/strings/stringprintf.h"
+ #include "device/bluetooth/bluetooth_low_energy_defs_win.h"
+ 
+-namespace device::win {
++namespace {
++const char kPlatformNotSupported[] =
++    "Bluetooth Low energy is only supported on Windows 8 and later.";
++}  // namespace
++
++namespace device {
++namespace win {
+ 
+ BLEDevice::BLEDevice() {}
+ BLEDevice::~BLEDevice() {}
+@@ -35,9 +38,18 @@ BluetoothLowEnergyWrapperFake::BluetoothLowEnergyWrapperFake()
+     : observer_(nullptr) {}
+ BluetoothLowEnergyWrapperFake::~BluetoothLowEnergyWrapperFake() {}
+ 
++bool BluetoothLowEnergyWrapperFake::IsBluetoothLowEnergySupported() {
++  return true;
++}
++
+ bool BluetoothLowEnergyWrapperFake::EnumerateKnownBluetoothLowEnergyDevices(
+     std::vector<std::unique_ptr<BluetoothLowEnergyDeviceInfo>>* devices,
+     std::string* error) {
++  if (!IsBluetoothLowEnergySupported()) {
++    *error = kPlatformNotSupported;
++    return false;
++  }
++
+   for (auto& device : simulated_devices_) {
+     if (device.second->marked_as_deleted)
+       continue;
+@@ -52,6 +64,11 @@ bool BluetoothLowEnergyWrapperFake::
+     EnumerateKnownBluetoothLowEnergyGattServiceDevices(
+         std::vector<std::unique_ptr<BluetoothLowEnergyDeviceInfo>>* devices,
+         std::string* error) {
++  if (!IsBluetoothLowEnergySupported()) {
++    *error = kPlatformNotSupported;
++    return false;
++  }
++
+   for (auto& device : simulated_devices_) {
+     for (auto& service : device.second->primary_services) {
+       auto device_info = std::make_unique<BluetoothLowEnergyDeviceInfo>();
+@@ -70,6 +87,11 @@ bool BluetoothLowEnergyWrapperFake::EnumerateKnownBluetoothLowEnergyServices(
+     const base::FilePath& device_path,
+     std::vector<std::unique_ptr<BluetoothLowEnergyServiceInfo>>* services,
+     std::string* error) {
++  if (!IsBluetoothLowEnergySupported()) {
++    *error = kPlatformNotSupported;
++    return false;
++  }
++
+   std::wstring device_address =
+       ExtractDeviceAddressFromDevicePath(device_path.value());
+   std::vector<std::string> service_attribute_handles =
+@@ -623,4 +645,5 @@ std::string BluetoothLowEnergyWrapperFake::BluetoothAddressToCanonicalString(
+   return result;
+ }
+ 
+-}  // namespace device::win
++}  // namespace win
++}  // namespace device
+diff --git a/device/bluetooth/bluetooth_low_energy_win_fake.h b/device/bluetooth/bluetooth_low_energy_win_fake.h
+index 072fa7abaeea6..ec515e552ea12 100644
+--- a/device/bluetooth/bluetooth_low_energy_win_fake.h
++++ b/device/bluetooth/bluetooth_low_energy_win_fake.h
+@@ -103,6 +103,7 @@ class BluetoothLowEnergyWrapperFake : public BluetoothLowEnergyWrapper {
+   BluetoothLowEnergyWrapperFake();
+   ~BluetoothLowEnergyWrapperFake() override;
+ 
++  bool IsBluetoothLowEnergySupported() override;
+   bool EnumerateKnownBluetoothLowEnergyDevices(
+       std::vector<std::unique_ptr<BluetoothLowEnergyDeviceInfo>>* devices,
+       std::string* error) override;
+diff --git a/device/bluetooth/bluetooth_task_manager_win.cc b/device/bluetooth/bluetooth_task_manager_win.cc
+index 6a1e32747b6c6..f4357621a146a 100644
+--- a/device/bluetooth/bluetooth_task_manager_win.cc
++++ b/device/bluetooth/bluetooth_task_manager_win.cc
+@@ -562,6 +562,10 @@ bool BluetoothTaskManagerWin::SearchClassicDevices(
+ 
+ bool BluetoothTaskManagerWin::SearchLowEnergyDevices(
+     std::vector<std::unique_ptr<DeviceState>>* device_list) {
++  if (!le_wrapper_->IsBluetoothLowEnergySupported()) {
++    return true;  // Bluetooth LE not supported is not an error.
++  }
++
+   std::vector<std::unique_ptr<win::BluetoothLowEnergyDeviceInfo>> btle_devices;
+   std::string error;
+   bool success = le_wrapper_->EnumerateKnownBluetoothLowEnergyDevices(
+@@ -718,6 +722,10 @@ int BluetoothTaskManagerWin::DiscoverClassicDeviceServicesWorker(
+ bool BluetoothTaskManagerWin::DiscoverLowEnergyDeviceServices(
+     const base::FilePath& device_path,
+     std::vector<std::unique_ptr<ServiceRecordState>>* service_record_states) {
++  if (!le_wrapper_->IsBluetoothLowEnergySupported()) {
++    return true;  // Bluetooth LE not supported is not an error.
++  }
++
+   std::string error;
+   std::vector<std::unique_ptr<win::BluetoothLowEnergyServiceInfo>> services;
+   bool success = le_wrapper_->EnumerateKnownBluetoothLowEnergyServices(
+diff --git a/device/bluetooth/test/bluetooth_test_win.cc b/device/bluetooth/test/bluetooth_test_win.cc
+index 149d3fc98ac8a..3802049f3e3fc 100644
+--- a/device/bluetooth/test/bluetooth_test_win.cc
++++ b/device/bluetooth/test/bluetooth_test_win.cc
+@@ -55,7 +55,10 @@
+ // Note: As UWP does not provide int specializations for IObservableVector and
+ // VectorChangedEventHandler we need to supply our own. UUIDs were generated
+ // using `uuidgen`.
+-namespace ABI::Windows::Foundation::Collections {
++namespace ABI {
++namespace Windows {
++namespace Foundation {
++namespace Collections {
+ 
+ template <>
+ struct __declspec(uuid("2736c37e-4218-496f-a46a-92d5d9e610a9"))
+@@ -65,7 +68,10 @@ template <>
+ struct __declspec(uuid("94844fba-ddf9-475c-be6e-ebb87039cef6"))
+     VectorChangedEventHandler<GUID> : VectorChangedEventHandler_impl<GUID> {};
+ 
+-}  // namespace ABI::Windows::Foundation::Collections
++}  // namespace Collections
++}  // namespace Foundation
++}  // namespace Windows
++}  // namespace ABI
+ 
+ namespace device {
+ 
+@@ -256,6 +262,8 @@ BluetoothTestWin::BluetoothTestWin()
+ BluetoothTestWin::~BluetoothTestWin() {}
+ 
+ bool BluetoothTestWin::PlatformSupportsLowEnergy() {
++  if (fake_bt_le_wrapper_)
++    return fake_bt_le_wrapper_->IsBluetoothLowEnergySupported();
+   return true;
+ }
+ 
+@@ -685,7 +693,9 @@ BluetoothTestWinrt::BluetoothTestWinrt() {
+   std::vector<base::test::FeatureRef> disabled;
+   if (GetParam().new_ble_implementation_enabled) {
+     enabled.push_back(kNewBLEWinImplementation);
+-    scoped_winrt_initializer_.emplace();
++    if (base::win::GetVersion() >= base::win::Version::WIN10) {
++      scoped_winrt_initializer_.emplace();
++    }
+   } else {
+     disabled.push_back(kNewBLEWinImplementation);
+   }
+@@ -706,6 +716,12 @@ BluetoothTestWinrt::~BluetoothTestWinrt() {
+   notify_sessions_.clear();
+ }
+ 
++bool BluetoothTestWinrt::PlatformSupportsLowEnergy() {
++  return UsesNewBleImplementation()
++             ? base::win::GetVersion() >= base::win::Version::WIN10
++             : BluetoothTestWin::PlatformSupportsLowEnergy();
++}
++
+ bool BluetoothTestWinrt::UsesNewBleImplementation() const {
+   return GetParam().new_ble_implementation_enabled;
+ }
+@@ -832,9 +848,8 @@ void BluetoothTestWinrt::SimulateAdapterPoweredOff() {
+ 
+ BluetoothDevice* BluetoothTestWinrt::SimulateLowEnergyDevice(
+     int device_ordinal) {
+-  if (!UsesNewBleImplementation()) {
++  if (!UsesNewBleImplementation() || !PlatformSupportsLowEnergy())
+     return BluetoothTestWin::SimulateLowEnergyDevice(device_ordinal);
+-  }
+ 
+   LowEnergyDeviceData data = GetLowEnergyDeviceData(device_ordinal);
+   static_cast<TestBluetoothAdapterWinrt*>(adapter_.get())
+@@ -911,9 +926,8 @@ void BluetoothTestWinrt::SimulateAdvertisementError(
+ }
+ 
+ void BluetoothTestWinrt::SimulateGattConnection(BluetoothDevice* device) {
+-  if (!UsesNewBleImplementation()) {
++  if (!UsesNewBleImplementation() || !PlatformSupportsLowEnergy())
+     return BluetoothTestWin::SimulateGattConnection(device);
+-  }
+ 
+   // Spin the message loop to make sure a device instance was obtained.
+   base::RunLoop().RunUntilIdle();
+@@ -934,9 +948,8 @@ void BluetoothTestWinrt::SimulateGattConnection(BluetoothDevice* device) {
+ 
+ void BluetoothTestWinrt::SimulateGattNameChange(BluetoothDevice* device,
+                                                 const std::string& new_name) {
+-  if (!UsesNewBleImplementation()) {
++  if (!UsesNewBleImplementation() || !PlatformSupportsLowEnergy())
+     return BluetoothTestWin::SimulateGattNameChange(device, new_name);
+-  }
+ 
+   auto* const ble_device =
+       static_cast<TestBluetoothDeviceWinrt*>(device)->ble_device();
+@@ -946,9 +959,8 @@ void BluetoothTestWinrt::SimulateGattNameChange(BluetoothDevice* device,
+ 
+ void BluetoothTestWinrt::SimulateStatusChangeToDisconnect(
+     BluetoothDevice* device) {
+-  if (!UsesNewBleImplementation()) {
++  if (!UsesNewBleImplementation() || !PlatformSupportsLowEnergy())
+     return BluetoothTestWin::SimulateStatusChangeToDisconnect(device);
+-  }
+   // Spin the message loop to make sure a device instance was obtained.
+   base::RunLoop().RunUntilIdle();
+   auto* const ble_device =
+@@ -1000,10 +1012,9 @@ void BluetoothTestWinrt::SimulateGattServicesDiscovered(
+     BluetoothDevice* device,
+     const std::vector<std::string>& uuids,
+     const std::vector<std::string>& blocked_uuids) {
+-  if (!UsesNewBleImplementation()) {
++  if (!UsesNewBleImplementation() || !PlatformSupportsLowEnergy())
+     return BluetoothTestWin::SimulateGattServicesDiscovered(device, uuids,
+                                                             blocked_uuids);
+-  }
+ 
+   auto* const ble_device =
+       static_cast<TestBluetoothDeviceWinrt*>(device)->ble_device();
+@@ -1012,9 +1023,8 @@ void BluetoothTestWinrt::SimulateGattServicesDiscovered(
+ }
+ 
+ void BluetoothTestWinrt::SimulateGattServicesChanged(BluetoothDevice* device) {
+-  if (!UsesNewBleImplementation()) {
++  if (!UsesNewBleImplementation() || !PlatformSupportsLowEnergy())
+     return BluetoothTestWin::SimulateGattServicesChanged(device);
+-  }
+ 
+   auto* const ble_device =
+       static_cast<TestBluetoothDeviceWinrt*>(device)->ble_device();
+@@ -1024,9 +1034,8 @@ void BluetoothTestWinrt::SimulateGattServicesChanged(BluetoothDevice* device) {
+ 
+ void BluetoothTestWinrt::SimulateGattServiceRemoved(
+     BluetoothRemoteGattService* service) {
+-  if (!UsesNewBleImplementation()) {
++  if (!UsesNewBleImplementation() || !PlatformSupportsLowEnergy())
+     return BluetoothTestWin::SimulateGattServiceRemoved(service);
+-  }
+ 
+   auto* const ble_device =
+       static_cast<TestBluetoothDeviceWinrt*>(service->GetDevice())
+@@ -1037,9 +1046,8 @@ void BluetoothTestWinrt::SimulateGattServiceRemoved(
+ 
+ void BluetoothTestWinrt::SimulateGattServicesDiscoveryError(
+     BluetoothDevice* device) {
+-  if (!UsesNewBleImplementation()) {
++  if (!UsesNewBleImplementation() || !PlatformSupportsLowEnergy())
+     return BluetoothTestWin::SimulateGattServicesDiscoveryError(device);
+-  }
+ 
+   auto* const ble_device =
+       static_cast<TestBluetoothDeviceWinrt*>(device)->ble_device();
+@@ -1051,10 +1059,9 @@ void BluetoothTestWinrt::SimulateGattCharacteristic(
+     BluetoothRemoteGattService* service,
+     const std::string& uuid,
+     int properties) {
+-  if (!UsesNewBleImplementation()) {
++  if (!UsesNewBleImplementation() || !PlatformSupportsLowEnergy())
+     return BluetoothTestWin::SimulateGattCharacteristic(service, uuid,
+                                                         properties);
+-  }
+ 
+   auto* const ble_device =
+       static_cast<TestBluetoothDeviceWinrt*>(service->GetDevice())
+@@ -1065,9 +1072,8 @@ void BluetoothTestWinrt::SimulateGattCharacteristic(
+ 
+ void BluetoothTestWinrt::SimulateGattNotifySessionStarted(
+     BluetoothRemoteGattCharacteristic* characteristic) {
+-  if (!UsesNewBleImplementation()) {
++  if (!UsesNewBleImplementation() || !PlatformSupportsLowEnergy())
+     return BluetoothTestWin::SimulateGattNotifySessionStarted(characteristic);
+-  }
+ 
+   static_cast<FakeGattCharacteristicWinrt*>(
+       static_cast<BluetoothRemoteGattCharacteristicWinrt*>(characteristic)
+@@ -1078,7 +1084,7 @@ void BluetoothTestWinrt::SimulateGattNotifySessionStarted(
+ void BluetoothTestWinrt::SimulateGattNotifySessionStartError(
+     BluetoothRemoteGattCharacteristic* characteristic,
+     BluetoothGattService::GattErrorCode error_code) {
+-  if (!UsesNewBleImplementation()) {
++  if (!UsesNewBleImplementation() || !PlatformSupportsLowEnergy()) {
+     return BluetoothTestWin::SimulateGattNotifySessionStartError(characteristic,
+                                                                  error_code);
+   }
+@@ -1109,7 +1115,7 @@ void BluetoothTestWinrt::SimulateGattNotifySessionStopError(
+ void BluetoothTestWinrt::SimulateGattCharacteristicChanged(
+     BluetoothRemoteGattCharacteristic* characteristic,
+     const std::vector<uint8_t>& value) {
+-  if (!UsesNewBleImplementation()) {
++  if (!UsesNewBleImplementation() || !PlatformSupportsLowEnergy()) {
+     return BluetoothTestWin::SimulateGattCharacteristicChanged(characteristic,
+                                                                value);
+   }
+@@ -1123,7 +1129,7 @@ void BluetoothTestWinrt::SimulateGattCharacteristicChanged(
+ void BluetoothTestWinrt::SimulateGattCharacteristicRead(
+     BluetoothRemoteGattCharacteristic* characteristic,
+     const std::vector<uint8_t>& value) {
+-  if (!UsesNewBleImplementation()) {
++  if (!UsesNewBleImplementation() || !PlatformSupportsLowEnergy()) {
+     return BluetoothTestWin::SimulateGattCharacteristicRead(characteristic,
+                                                             value);
+   }
+@@ -1137,7 +1143,7 @@ void BluetoothTestWinrt::SimulateGattCharacteristicRead(
+ void BluetoothTestWinrt::SimulateGattCharacteristicReadError(
+     BluetoothRemoteGattCharacteristic* characteristic,
+     BluetoothGattService::GattErrorCode error_code) {
+-  if (!UsesNewBleImplementation()) {
++  if (!UsesNewBleImplementation() || !PlatformSupportsLowEnergy()) {
+     return BluetoothTestWin::SimulateGattCharacteristicReadError(characteristic,
+                                                                  error_code);
+   }
+@@ -1150,9 +1156,8 @@ void BluetoothTestWinrt::SimulateGattCharacteristicReadError(
+ 
+ void BluetoothTestWinrt::SimulateGattCharacteristicWrite(
+     BluetoothRemoteGattCharacteristic* characteristic) {
+-  if (!UsesNewBleImplementation()) {
++  if (!UsesNewBleImplementation() || !PlatformSupportsLowEnergy())
+     return BluetoothTestWin::SimulateGattCharacteristicWrite(characteristic);
+-  }
+ 
+   static_cast<FakeGattCharacteristicWinrt*>(
+       static_cast<BluetoothRemoteGattCharacteristicWinrt*>(characteristic)
+@@ -1163,7 +1168,7 @@ void BluetoothTestWinrt::SimulateGattCharacteristicWrite(
+ void BluetoothTestWinrt::SimulateGattCharacteristicWriteError(
+     BluetoothRemoteGattCharacteristic* characteristic,
+     BluetoothGattService::GattErrorCode error_code) {
+-  if (!UsesNewBleImplementation()) {
++  if (!UsesNewBleImplementation() || !PlatformSupportsLowEnergy()) {
+     return BluetoothTestWin::SimulateGattCharacteristicWriteError(
+         characteristic, error_code);
+   }
+@@ -1177,9 +1182,8 @@ void BluetoothTestWinrt::SimulateGattCharacteristicWriteError(
+ void BluetoothTestWinrt::SimulateGattDescriptor(
+     BluetoothRemoteGattCharacteristic* characteristic,
+     const std::string& uuid) {
+-  if (!UsesNewBleImplementation()) {
++  if (!UsesNewBleImplementation() || !PlatformSupportsLowEnergy())
+     return BluetoothTestWin::SimulateGattDescriptor(characteristic, uuid);
+-  }
+ 
+   auto* const ble_device = static_cast<TestBluetoothDeviceWinrt*>(
+                                characteristic->GetService()->GetDevice())
+@@ -1224,8 +1228,9 @@ void BluetoothTestWinrt::SimulateGattDescriptorWriteError(
+ }
+ 
+ void BluetoothTestWinrt::DeleteDevice(BluetoothDevice* device) {
+-  (!UsesNewBleImplementation()) ? BluetoothTestWin::DeleteDevice(device)
+-                                : BluetoothTestBase::DeleteDevice(device);
++  (!UsesNewBleImplementation() || !PlatformSupportsLowEnergy())
++      ? BluetoothTestWin::DeleteDevice(device)
++      : BluetoothTestBase::DeleteDevice(device);
+ }
+ 
+ void BluetoothTestWinrt::OnFakeBluetoothDeviceConnectGattAttempt() {
+diff --git a/device/bluetooth/test/bluetooth_test_win.h b/device/bluetooth/test/bluetooth_test_win.h
+index d1c5356ca22e7..fd3117139fb3f 100644
+--- a/device/bluetooth/test/bluetooth_test_win.h
++++ b/device/bluetooth/test/bluetooth_test_win.h
+@@ -181,6 +181,7 @@ class BluetoothTestWinrt
+   void SimulateSpuriousRadioStateChangedEvent();
+ 
+   // BluetoothTestBase:
++  bool PlatformSupportsLowEnergy() override;
+   void InitWithDefaultAdapter() override;
+   void InitWithoutDefaultAdapter() override;
+   void InitWithFakeAdapter() override;
+diff --git a/device/gamepad/gamepad_platform_data_fetcher.h b/device/gamepad/gamepad_platform_data_fetcher.h
+index e1039f557b773..febcebedf79a1 100644
+--- a/device/gamepad/gamepad_platform_data_fetcher.h
++++ b/device/gamepad/gamepad_platform_data_fetcher.h
+@@ -18,6 +18,7 @@
+ #if BUILDFLAG(IS_ANDROID)
+ #include "device/gamepad/gamepad_platform_data_fetcher_android.h"
+ #elif BUILDFLAG(IS_WIN)
++#include "base/win/windows_version.h"
+ #include "device/gamepad/nintendo_data_fetcher.h"
+ #include "device/gamepad/raw_input_data_fetcher_win.h"
+ #include "device/gamepad/wgi_data_fetcher_win.h"
+@@ -45,7 +46,8 @@ void AddGamepadPlatformDataFetchers(GamepadDataFetcherManager* manager) {
+ 
+   // Windows.Gaming.Input is available in Windows 10.0.10240.0 and later.
+   if (base::FeatureList::IsEnabled(
+-          features::kEnableWindowsGamingInputDataFetcher)) {
++          features::kEnableWindowsGamingInputDataFetcher) &&
++      base::win::GetVersion() >= base::win::Version::WIN10) {
+     manager->AddFactory(new WgiDataFetcherWin::Factory());
+   } else {
+     manager->AddFactory(new XInputDataFetcherWin::Factory());
+diff --git a/device/gamepad/wgi_data_fetcher_win_unittest.cc b/device/gamepad/wgi_data_fetcher_win_unittest.cc
+index 198f1cf1e1ee1..4b2628f2e70cc 100644
+--- a/device/gamepad/wgi_data_fetcher_win_unittest.cc
++++ b/device/gamepad/wgi_data_fetcher_win_unittest.cc
+@@ -22,6 +22,7 @@
+ #include "base/threading/thread.h"
+ #include "base/time/time.h"
+ #include "base/win/scoped_hstring.h"
++#include "base/win/windows_version.h"
+ #include "device/gamepad/gamepad_id_list.h"
+ #include "device/gamepad/gamepad_pad_state_provider.h"
+ #include "device/gamepad/gamepad_provider.h"
+@@ -159,6 +160,13 @@ class WgiDataFetcherWinTest : public DeviceServiceTestBase {
+   WgiDataFetcherWinTest() = default;
+   ~WgiDataFetcherWinTest() override = default;
+ 
++  void SetUp() override {
++    // Windows.Gaming.Input is available in Windows 10.0.10240.0 and later.
++    if (base::win::GetVersion() < base::win::Version::WIN10)
++      GTEST_SKIP();
++    DeviceServiceTestBase::SetUp();
++  }
++
+   void SetUpXInputEnv(WgiTestErrorCode error_code) {
+     // Resetting MockXInputGetStateExFunc static variable state.
+     MockXInputGetStateExFunc(XUSER_MAX_COUNT + 1, nullptr);
+diff --git a/device/gamepad/xinput_data_fetcher_win.cc b/device/gamepad/xinput_data_fetcher_win.cc
+index 22128dddc7338..777b697fdf67d 100644
+--- a/device/gamepad/xinput_data_fetcher_win.cc
++++ b/device/gamepad/xinput_data_fetcher_win.cc
+@@ -17,6 +17,7 @@
+ #include "base/task/sequenced_task_runner.h"
+ #include "base/task/single_thread_task_runner.h"
+ #include "base/trace_event/trace_event.h"
++#include "base/win/windows_version.h"
+ 
+ namespace device {
+ 
+@@ -44,13 +45,21 @@ static const LPCSTR kXInputGetStateExOrdinal = (LPCSTR)100;
+ // Bitmask for the Guide button in XInputGamepadEx.wButtons.
+ static const int kXInputGamepadGuide = 0x0400;
+ 
+-constexpr base::FilePath::CharType kXInputDllFileName[] =
+-    FILE_PATH_LITERAL("xinput1_4.dll");
+-
+ float NormalizeXInputAxis(SHORT value) {
+   return ((value + 32768.f) / 32767.5f) - 1.f;
+ }
+ 
++const base::FilePath::CharType* XInputDllFileName() {
++  // Xinput.h defines filename (XINPUT_DLL) on different Windows versions, but
++  // Xinput.h specifies it in build time. Approach here uses the same values
++  // and it is resolving dll filename based on Windows version it is running on.
++  if (base::win::GetVersion() >= base::win::Version::WIN8) {
++    // For Windows 8+, XINPUT_DLL is xinput1_4.dll.
++    return FILE_PATH_LITERAL("xinput1_4.dll");
++  }
++  return FILE_PATH_LITERAL("xinput9_1_0.dll");
++}
++
+ }  // namespace
+ 
+ XInputDataFetcherWin::XInputDataFetcherWin() : xinput_available_(false) {}
+@@ -67,7 +76,7 @@ GamepadSource XInputDataFetcherWin::source() {
+ }
+ 
+ void XInputDataFetcherWin::OnAddedToProvider() {
+-  xinput_dll_ = base::ScopedNativeLibrary(base::FilePath(kXInputDllFileName));
++  xinput_dll_ = base::ScopedNativeLibrary(base::FilePath(XInputDllFileName()));
+   xinput_available_ = GetXInputDllFunctions();
+ }
+ 
+@@ -393,7 +402,7 @@ bool XInputDataFetcherWin::GetXInputDllFunctionsForWgiDataFetcher() {
+ }
+ 
+ void XInputDataFetcherWin::InitializeForWgiDataFetcher() {
+-  xinput_dll_ = base::ScopedNativeLibrary(base::FilePath(kXInputDllFileName));
++  xinput_dll_ = base::ScopedNativeLibrary(base::FilePath(XInputDllFileName()));
+   xinput_available_ = GetXInputDllFunctionsForWgiDataFetcher();
+ }
+ 

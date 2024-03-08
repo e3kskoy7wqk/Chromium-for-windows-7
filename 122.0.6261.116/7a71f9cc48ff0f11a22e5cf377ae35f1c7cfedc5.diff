@@ -1,0 +1,148 @@
+commit 7a71f9cc48ff0f11a22e5cf377ae35f1c7cfedc5
+Author: John Doe <jdoe@email.com>
+Date:   Sun Feb 11 23:44:58 2024 +0800
+
+    Disable CallNtPowerInformation on win7
+
+diff --git a/base/power_monitor/speed_limit_observer_win.cc b/base/power_monitor/speed_limit_observer_win.cc
+index f7f7927e4dbe7..69e09d0430f89 100644
+--- a/base/power_monitor/speed_limit_observer_win.cc
++++ b/base/power_monitor/speed_limit_observer_win.cc
+@@ -56,17 +56,38 @@ typedef struct _SYSTEM_POWER_INFORMATION {
+   UCHAR CoolingMode;
+ } SYSTEM_POWER_INFORMATION, *PSYSTEM_POWER_INFORMATION;
+ 
++// function types
++typedef NTSTATUS (WINAPI *PCALLNTPOWERINFORMATION_PROC)(POWER_INFORMATION_LEVEL, PVOID, ULONG, PVOID, ULONG);
++
+ // Returns information about the idleness of the system.
+ bool GetCPUIdleness(int* idleness_percent) {
+   auto info = std::make_unique<SYSTEM_POWER_INFORMATION>();
+-  if (!NT_SUCCESS(CallNtPowerInformation(SystemPowerInformation, nullptr, 0,
++  // DLL handle
++  HINSTANCE hLib = NULL;
++  PCALLNTPOWERINFORMATION_PROC fCallNtPowerInformation;
++  // load POWRPROF.DLL
++  hLib = LoadLibraryW(L"POWRPROF.DLL");
++  if(!hLib) {
++    *idleness_percent = 0;
++    return false;
++  }
++  fCallNtPowerInformation = (PCALLNTPOWERINFORMATION_PROC)GetProcAddress(hLib,"CallNtPowerInformation");
++  if(!fCallNtPowerInformation)
++  {
++    *idleness_percent = 0;
++    FreeLibrary(hLib);
++    return false;
++  }
++  if (!NT_SUCCESS(fCallNtPowerInformation(SystemPowerInformation, nullptr, 0,
+                                          info.get(),
+                                          sizeof(SYSTEM_POWER_INFORMATION)))) {
+     *idleness_percent = 0;
++    FreeLibrary(hLib);
+     return false;
+   }
+   // The current idle level, expressed as a percentage.
+   *idleness_percent = static_cast<int>(info->Idleness);
++  FreeLibrary(hLib);
+   return true;
+ }
+ 
+@@ -205,13 +226,28 @@ void SpeedLimitObserverWin::OnTimerTick() {
+ float SpeedLimitObserverWin::EstimateThrottlingLevel() {
+   float throttling_level = 0.f;
+ 
++  // DLL handle
++  HINSTANCE hLib = NULL;
++  PCALLNTPOWERINFORMATION_PROC fCallNtPowerInformation;
++  // load POWRPROF.DLL
++  hLib = LoadLibraryW(L"POWRPROF.DLL");
++  if(!hLib) {
++    return throttling_level;
++  }
++  fCallNtPowerInformation = (PCALLNTPOWERINFORMATION_PROC)GetProcAddress(hLib,"CallNtPowerInformation");
++  if(!fCallNtPowerInformation)
++  {
++    FreeLibrary(hLib);
++    return throttling_level;
++  }
+   // Populate the PROCESSOR_POWER_INFORMATION structures for all logical CPUs
+   // using the CallNtPowerInformation API.
+   std::vector<PROCESSOR_POWER_INFORMATION> info(num_cpus());
+-  if (!NT_SUCCESS(CallNtPowerInformation(
++  if (!NT_SUCCESS(fCallNtPowerInformation(
+           ProcessorInformation, nullptr, 0, &info[0],
+           static_cast<ULONG>(sizeof(PROCESSOR_POWER_INFORMATION) *
+                              num_cpus())))) {
++    FreeLibrary(hLib);
+     return throttling_level;
+   }
+ 
+@@ -261,6 +297,7 @@ float SpeedLimitObserverWin::EstimateThrottlingLevel() {
+ 
+   TRACE_COUNTER1(kPowerTraceCategory, "num_active_cpus", num_active_cpus);
+ 
++  FreeLibrary(hLib);
+   return throttling_level;
+ }
+ 
+diff --git a/third_party/crashpad/crashpad/snapshot/win/system_snapshot_win.cc b/third_party/crashpad/crashpad/snapshot/win/system_snapshot_win.cc
+index 1eaad8a968aa2..b4827e218a433 100644
+--- a/third_party/crashpad/crashpad/snapshot/win/system_snapshot_win.cc
++++ b/third_party/crashpad/crashpad/snapshot/win/system_snapshot_win.cc
+@@ -115,6 +115,14 @@ bool ReadRegistryDWORDFromSZ(HKEY key, const char* name, int* out_value) {
+   return false;
+ }
+ 
++//
++// NTSTATUS
++//
++
++typedef LONG NTSTATUS;
++// function types
++typedef NTSTATUS (WINAPI *PCALLNTPOWERINFORMATION_PROC)(POWER_INFORMATION_LEVEL, PVOID, ULONG, PVOID, ULONG);
++
+ }  // namespace
+ 
+ namespace internal {
+@@ -324,12 +332,31 @@ void SystemSnapshotWin::CPUFrequency(uint64_t* current_hz,
+   int num_cpus = CPUCount();
+   DCHECK_GT(num_cpus, 0);
+   std::vector<PROCESSOR_POWER_INFORMATION> info(num_cpus);
+-  if (CallNtPowerInformation(ProcessorInformation,
++  // DLL handle
++  HINSTANCE hLib = NULL;
++  PCALLNTPOWERINFORMATION_PROC fCallNtPowerInformation;
++  // load POWRPROF.DLL
++  hLib = LoadLibraryW(L"POWRPROF.DLL");
++  if(!hLib) {
++    *current_hz = 0;
++    *max_hz = 0;
++    return;
++  }
++  fCallNtPowerInformation = (PCALLNTPOWERINFORMATION_PROC)GetProcAddress(hLib,"CallNtPowerInformation");
++  if(!fCallNtPowerInformation)
++  {
++    FreeLibrary(hLib);
++    *current_hz = 0;
++    *max_hz = 0;
++    return;
++  }
++  if (fCallNtPowerInformation(ProcessorInformation,
+                              nullptr,
+                              0,
+                              &info[0],
+                              sizeof(PROCESSOR_POWER_INFORMATION) * num_cpus) !=
+       0) {
++    FreeLibrary(hLib);
+     *current_hz = 0;
+     *max_hz = 0;
+     return;
+@@ -349,6 +376,7 @@ void SystemSnapshotWin::CPUFrequency(uint64_t* current_hz,
+                                return a.MaxMhz < b.MaxMhz;
+                              })->MaxMhz *
+             kMhzToHz;
++  FreeLibrary(hLib);
+ }
+ 
+ uint32_t SystemSnapshotWin::CPUX86Signature() const {

@@ -1,0 +1,327 @@
+commit f1d571d0fa0cc796806785396cc90a1ae906f9af
+Author: John Doe <jdoe@email.com>
+Date:   Sun Feb 11 23:48:27 2024 +0800
+
+    updater: removed unused code in util/win_util.    2023-07-08 06:02:34    4befe5d16489743e0fe218852d315afdd2d644bf
+
+diff --git a/chrome/updater/BUILD.gn b/chrome/updater/BUILD.gn
+index 53ff82f91b3d4..842a99a978204 100644
+--- a/chrome/updater/BUILD.gn
++++ b/chrome/updater/BUILD.gn
+@@ -293,6 +293,8 @@ if (is_win || is_mac || is_linux) {
+         "win/ui/ui_constants.cc",
+         "win/ui/ui_constants.h",
+         "win/ui/ui_ctls.h",
++        "win/ui/ui_displayed_event.cc",
++        "win/ui/ui_displayed_event.h",
+         "win/ui/ui_util.cc",
+         "win/ui/ui_util.h",
+         "win/ui/yes_no_dialog.cc",
+diff --git a/chrome/updater/util/win_util.cc b/chrome/updater/util/win_util.cc
+index acb21cb9ee9b2..b45842a51c63f 100644
+--- a/chrome/updater/util/win_util.cc
++++ b/chrome/updater/util/win_util.cc
+@@ -13,6 +13,7 @@
+ #include <windows.h>
+ #include <winhttp.h>
+ #include <wrl/client.h>
++#include <wtsapi32.h>
+ 
+ #include <algorithm>
+ #include <cstdlib>
+@@ -231,6 +232,75 @@ HRESULT HRESULTFromLastError() {
+   return (error_code != NO_ERROR) ? HRESULT_FROM_WIN32(error_code) : E_FAIL;
+ }
+ 
++HMODULE GetModuleHandleFromAddress(void* address) {
++  MEMORY_BASIC_INFORMATION mbi = {0};
++  size_t result = ::VirtualQuery(address, &mbi, sizeof(mbi));
++  CHECK_EQ(result, sizeof(mbi));
++  return static_cast<HMODULE>(mbi.AllocationBase);
++}
++
++HMODULE GetCurrentModuleHandle() {
++  return GetModuleHandleFromAddress(
++      reinterpret_cast<void*>(&GetCurrentModuleHandle));
++}
++
++// The event name saved to the environment variable does not contain the
++// decoration added by GetNamedObjectAttributes.
++HRESULT CreateUniqueEventInEnvironment(const std::wstring& var_name,
++                                       UpdaterScope scope,
++                                       HANDLE* unique_event) {
++  CHECK(unique_event);
++
++  const std::wstring event_name =
++      base::ASCIIToWide(base::Uuid::GenerateRandomV4().AsLowercaseString());
++  NamedObjectAttributes attr =
++      GetNamedObjectAttributes(event_name.c_str(), scope);
++
++  HRESULT hr = CreateEvent(&attr, unique_event);
++  if (FAILED(hr))
++    return hr;
++
++  if (!::SetEnvironmentVariable(var_name.c_str(), event_name.c_str()))
++    return HRESULTFromLastError();
++
++  return S_OK;
++}
++
++HRESULT OpenUniqueEventFromEnvironment(const std::wstring& var_name,
++                                       UpdaterScope scope,
++                                       HANDLE* unique_event) {
++  CHECK(unique_event);
++
++  wchar_t event_name[MAX_PATH] = {0};
++  if (!::GetEnvironmentVariable(var_name.c_str(), event_name,
++                                std::size(event_name))) {
++    return HRESULTFromLastError();
++  }
++
++  NamedObjectAttributes attr = GetNamedObjectAttributes(event_name, scope);
++  *unique_event = ::OpenEvent(EVENT_ALL_ACCESS, false, attr.name.c_str());
++
++  if (!*unique_event)
++    return HRESULTFromLastError();
++
++  return S_OK;
++}
++
++HRESULT CreateEvent(NamedObjectAttributes* event_attr, HANDLE* event_handle) {
++  CHECK(event_handle);
++  CHECK(event_attr);
++  CHECK(!event_attr->name.empty());
++  *event_handle = ::CreateEvent(&event_attr->sa,
++                                true,   // manual reset
++                                false,  // not signaled
++                                event_attr->name.c_str());
++
++  if (!*event_handle)
++    return HRESULTFromLastError();
++
++  return S_OK;
++}
++
+ NamedObjectAttributes GetNamedObjectAttributes(const wchar_t* base_name,
+                                                UpdaterScope scope) {
+   CHECK(base_name);
+@@ -381,6 +451,33 @@ int GetDownloadProgress(int64_t downloaded_bytes, int64_t total_bytes) {
+                           0.0, 1.0);
+ }
+ 
++base::win::ScopedHandle GetUserTokenFromCurrentSessionId() {
++  base::win::ScopedHandle token_handle;
++
++  DWORD bytes_returned = 0;
++  DWORD* session_id_ptr = nullptr;
++  if (!::WTSQuerySessionInformation(
++          WTS_CURRENT_SERVER_HANDLE, WTS_CURRENT_SESSION, WTSSessionId,
++          reinterpret_cast<LPTSTR*>(&session_id_ptr), &bytes_returned)) {
++    PLOG(ERROR) << "WTSQuerySessionInformation failed.";
++    return token_handle;
++  }
++
++  CHECK_EQ(bytes_returned, sizeof(*session_id_ptr));
++  DWORD session_id = *session_id_ptr;
++  ::WTSFreeMemory(session_id_ptr);
++  VLOG(1) << "::WTSQuerySessionInformation session id: " << session_id;
++
++  HANDLE token_handle_raw = nullptr;
++  if (!::WTSQueryUserToken(session_id, &token_handle_raw)) {
++    PLOG(ERROR) << "WTSQueryUserToken failed";
++    return token_handle;
++  }
++
++  token_handle.Set(token_handle_raw);
++  return token_handle;
++}
++
+ HResultOr<bool> IsTokenAdmin(HANDLE token) {
+   SID_IDENTIFIER_AUTHORITY nt_authority = SECURITY_NT_AUTHORITY;
+   PSID administrators_group = nullptr;
+diff --git a/chrome/updater/util/win_util.h b/chrome/updater/util/win_util.h
+index bfce902bc902e..141b28e2fa0b3 100644
+--- a/chrome/updater/util/win_util.h
++++ b/chrome/updater/util/win_util.h
+@@ -159,6 +159,22 @@ bool IsProcessRunning(const wchar_t* executable);
+ // Returns true if every running processes are stopped.
+ bool WaitForProcessesStopped(const wchar_t* executable);
+ 
++// Gets the handle to the module containing the given executing address.
++HMODULE GetModuleHandleFromAddress(void* address);
++
++// Gets the handle to the currently executing module.
++HMODULE GetCurrentModuleHandle();
++
++// Creates a unique event name and stores it in the specified environment var.
++HRESULT CreateUniqueEventInEnvironment(const std::wstring& var_name,
++                                       UpdaterScope scope,
++                                       HANDLE* unique_event);
++
++// Obtains a unique event name from specified environment var and opens it.
++HRESULT OpenUniqueEventFromEnvironment(const std::wstring& var_name,
++                                       UpdaterScope scope,
++                                       HANDLE* unique_event);
++
+ struct NamedObjectAttributes {
+   NamedObjectAttributes(const std::wstring& name, const CSecurityDesc& sd);
+   NamedObjectAttributes(const NamedObjectAttributes& other) = delete;
+@@ -181,6 +197,9 @@ struct NamedObjectAttributes {
+ NamedObjectAttributes GetNamedObjectAttributes(const wchar_t* base_name,
+                                                UpdaterScope scope);
+ 
++// Creates an event based on the provided attributes.
++HRESULT CreateEvent(NamedObjectAttributes* event_attr, HANDLE* event_handle);
++
+ // Gets the security descriptor with the default DACL for the current process
+ // user. The owner is the current user, the group is the current primary group.
+ // Returns security attributes on success, nullopt on failure.
+@@ -231,6 +250,9 @@ bool SetRegistryKey(HKEY root,
+ // be computed.
+ int GetDownloadProgress(int64_t downloaded_bytes, int64_t total_bytes);
+ 
++// Returns a logged on user token handle from the current session.
++base::win::ScopedHandle GetUserTokenFromCurrentSessionId();
++
+ // Returns `true` if the token is an elevated administrator. If
+ // `token` is `NULL`, the current thread token is used.
+ HResultOr<bool> IsTokenAdmin(HANDLE token);
+diff --git a/chrome/updater/win/installer/BUILD.gn b/chrome/updater/win/installer/BUILD.gn
+index f22b81e5e6b01..cf2d061d8a872 100644
+--- a/chrome/updater/win/installer/BUILD.gn
++++ b/chrome/updater/win/installer/BUILD.gn
+@@ -20,7 +20,10 @@ source_set("msi_custom_action_sources") {
+     "//third_party/abseil-cpp:absl",
+   ]
+ 
+-  libs = [ "msi.lib" ]
++  libs = [
++    "msi.lib",
++    "wtsapi32.lib",
++  ]
+ }
+ 
+ shared_library("msi_custom_action") {
+diff --git a/chrome/updater/win/ui/ui_displayed_event.cc b/chrome/updater/win/ui/ui_displayed_event.cc
+new file mode 100644
+index 0000000000000..6f9dd7b1da7c2
+--- /dev/null
++++ b/chrome/updater/win/ui/ui_displayed_event.cc
+@@ -0,0 +1,69 @@
++// Copyright 2019 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/updater/win/ui/ui_displayed_event.h"
++
++#include "base/check.h"
++#include "base/no_destructor.h"
++#include "chrome/updater/updater_scope.h"
++#include "chrome/updater/util/win_util.h"
++#include "chrome/updater/win/ui/ui_constants.h"
++
++namespace updater::ui {
++
++HRESULT UIDisplayedEventManager::CreateEvent(UpdaterScope scope) {
++  CHECK(!IsEventHandleInitialized());
++  return CreateUniqueEventInEnvironment(
++      kLegacyUiDisplayedEventEnvironmentVariableName, scope,
++      ScopedKernelHANDLE::Receiver(GetUIDisplayedEvent()).get());
++}
++
++HRESULT UIDisplayedEventManager::GetEvent(UpdaterScope scope,
++                                          HANDLE* ui_displayed_event) {
++  CHECK(ui_displayed_event);
++  *ui_displayed_event = nullptr;
++  if (IsEventHandleInitialized()) {
++    *ui_displayed_event = GetUIDisplayedEvent().get();
++    return S_OK;
++  }
++
++  HRESULT hr = OpenUniqueEventFromEnvironment(
++      kLegacyUiDisplayedEventEnvironmentVariableName, scope,
++      ScopedKernelHANDLE::Receiver(GetUIDisplayedEvent()).get());
++  if (FAILED(hr)) {
++    return hr;
++  }
++
++  *ui_displayed_event = GetUIDisplayedEvent().get();
++  return S_OK;
++}
++
++void UIDisplayedEventManager::SignalEvent(UpdaterScope scope) {
++  if (!IsEventHandleInitialized()) {
++    HRESULT hr = GetEvent(
++        scope, ScopedKernelHANDLE::Receiver(GetUIDisplayedEvent()).get());
++    if (HRESULT_FROM_WIN32(ERROR_ENVVAR_NOT_FOUND) == hr) {
++      hr = CreateEvent(scope);
++    }
++    if (FAILED(hr)) {
++      // We may display two UIs in this case.
++      GetUIDisplayedEvent().reset();
++      return;
++    }
++  }
++
++  CHECK(IsEventHandleInitialized());
++  ::SetEvent(GetUIDisplayedEvent().get());
++}
++
++bool UIDisplayedEventManager::IsEventHandleInitialized() {
++  return GetUIDisplayedEvent().is_valid();
++}
++
++ScopedKernelHANDLE& UIDisplayedEventManager::GetUIDisplayedEvent() {
++  static base::NoDestructor<ScopedKernelHANDLE> ui_displayed_event;
++  return *ui_displayed_event;
++}
++
++}  // namespace updater::ui
+diff --git a/chrome/updater/win/ui/ui_displayed_event.h b/chrome/updater/win/ui/ui_displayed_event.h
+new file mode 100644
+index 0000000000000..166463ca50cc1
+--- /dev/null
++++ b/chrome/updater/win/ui/ui_displayed_event.h
+@@ -0,0 +1,42 @@
++// Copyright 2019 The Chromium Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_UPDATER_WIN_UI_UI_DISPLAYED_EVENT_H_
++#define CHROME_UPDATER_WIN_UI_UI_DISPLAYED_EVENT_H_
++
++#include <windows.h>
++
++#include "chrome/updater/updater_scope.h"
++#include "chrome/updater/win/scoped_handle.h"
++
++namespace updater::ui {
++
++// Manages an event used to synchronize the state of the UI between processes.
++// In this case, one process presents the splash screen UI, forks another
++// process, and waits for the new process to display UI before the splash
++// screen goes away.
++class UIDisplayedEventManager {
++ public:
++  // Signals the event. Creates the event if the event does not exist.
++  static void SignalEvent(UpdaterScope scope);
++
++ private:
++  // Creates the event and sets its name in an environment variable.
++  static HRESULT CreateEvent(UpdaterScope scope);
++
++  // Gets the event from the name in the environment variable. The caller does
++  // not own the event handle and must not close it. The handle is own by
++  // the process and the handle is closed when the process exits.
++  static HRESULT GetEvent(UpdaterScope scope, HANDLE* ui_displayed_event);
++
++  // Returns true if the event handle has been initialized in this process.
++  static bool IsEventHandleInitialized();
++
++  // A single instance of the handle in this process.
++  static ScopedKernelHANDLE& GetUIDisplayedEvent();
++};
++
++}  // namespace updater::ui
++
++#endif  // CHROME_UPDATER_WIN_UI_UI_DISPLAYED_EVENT_H_

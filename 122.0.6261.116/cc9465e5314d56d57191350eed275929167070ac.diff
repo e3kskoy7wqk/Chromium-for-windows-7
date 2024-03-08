@@ -1,0 +1,92 @@
+commit cc9465e5314d56d57191350eed275929167070ac
+Author: John Doe <jdoe@email.com>
+Date:   Mon Feb 12 15:40:23 2024 +0800
+
+    win7dep: Remove Win7 code in path_service and base process    2022-12-20 04:47:49    8c88556609dfe415758593e6c753c77f9d522a9a
+
+diff --git a/base/base_paths_win.cc b/base/base_paths_win.cc
+index 5fe5b7263d607..55e52c4933cae 100644
+--- a/base/base_paths_win.cc
++++ b/base/base_paths_win.cc
+@@ -147,6 +147,9 @@ bool PathProviderWin(int key, FilePath* result) {
+       break;
+     }
+     case base::DIR_APP_SHORTCUTS: {
++      if (win::GetVersion() < win::Version::WIN8)
++        return false;
++
+       base::win::ScopedCoMem<wchar_t> path_buf;
+       if (FAILED(SHGetKnownFolderPath(FOLDERID_ApplicationShortcuts, 0, NULL,
+                                       &path_buf)))
+diff --git a/base/path_service_unittest.cc b/base/path_service_unittest.cc
+index 15a707524f345..68bf474c90dda 100644
+--- a/base/path_service_unittest.cc
++++ b/base/path_service_unittest.cc
+@@ -144,7 +144,14 @@ TEST_F(PathServiceTest, Get) {
+   }
+ #if BUILDFLAG(IS_WIN)
+   for (int key = PATH_WIN_START + 1; key < PATH_WIN_END; ++key) {
+-    EXPECT_PRED1(ReturnsValidPath, key);
++    bool valid = true;
++    if (key == DIR_APP_SHORTCUTS)
++      valid = base::win::GetVersion() >= base::win::Version::WIN8;
++
++    if (valid)
++      EXPECT_PRED1(ReturnsValidPath, key);
++    else
++      EXPECT_PRED1(ReturnsInvalidPath, key);
+   }
+ #elif BUILDFLAG(IS_MAC)
+   for (int key = PATH_MAC_START + 1; key < PATH_MAC_END; ++key) {
+diff --git a/base/process/launch_win.cc b/base/process/launch_win.cc
+index eca51fa33f7fc..863ba745f028d 100644
+--- a/base/process/launch_win.cc
++++ b/base/process/launch_win.cc
+@@ -349,6 +349,15 @@ Process LaunchProcess(const CommandLine::StringType& cmdline,
+     startup_info->hStdError = options.stderr_handle;
+   }
+ 
++  if (options.job_handle) {
++    // If this code is run under a debugger, the launched process is
++    // automatically associated with a job object created by the debugger.
++    // The CREATE_BREAKAWAY_FROM_JOB flag is used to prevent this on Windows
++    // releases that do not support nested jobs.
++    if (win::GetVersion() < win::Version::WIN8)
++      flags |= CREATE_BREAKAWAY_FROM_JOB;
++  }
++
+   if (options.force_breakaway_from_job_)
+     flags |= CREATE_BREAKAWAY_FROM_JOB;
+ 
+diff --git a/base/process/process_unittest.cc b/base/process/process_unittest.cc
+index c80841078ea68..f74bd73683573 100644
+--- a/base/process/process_unittest.cc
++++ b/base/process/process_unittest.cc
+@@ -40,6 +40,7 @@
+ 
+ #if BUILDFLAG(IS_WIN)
+ #include "base/win/base_win_buildflags.h"
++#include "base/win/windows_version.h"
+ 
+ #include <windows.h>
+ #endif
+@@ -95,8 +96,7 @@ std::string GetProcessCpuCgroup(const base::Process& process) {
+   return std::string();
+ }
+ 
+-bool AddProcessToCpuCgroup(const base::Process& process,
+-                           const std::string& cgroup) {
++bool AddProcessToCpuCgroup(const base::Process& process, std::string& cgroup) {
+   base::FilePath path(cgroup);
+   path = path.Append("cgroup.procs");
+   return base::WriteFile(path, base::NumberToString(process.Pid()));
+@@ -767,6 +767,9 @@ TEST_F(ProcessTest, MAYBE_HeapCorruption) {
+ #define MAYBE_ControlFlowViolation DISABLED_ControlFlowViolation
+ #endif
+ TEST_F(ProcessTest, MAYBE_ControlFlowViolation) {
++  // CFG is only supported on Windows 8.1 or greater.
++  if (base::win::GetVersion() < base::win::Version::WIN8_1)
++    return;
+   // CFG causes ntdll!RtlFailFast2 to be called resulting in uncatchable
+   // 0xC0000409 (STATUS_STACK_BUFFER_OVERRUN) exception.
+   EXPECT_EXIT(base::debug::win::TerminateWithControlFlowViolation(),

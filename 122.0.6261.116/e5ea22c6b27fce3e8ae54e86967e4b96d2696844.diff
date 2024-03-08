@@ -1,0 +1,389 @@
+commit e5ea22c6b27fce3e8ae54e86967e4b96d2696844
+Author: John Doe <jdoe@email.com>
+Date:   Sun Feb 11 23:45:33 2024 +0800
+
+    Remove JobLevel::kNone    2023-03-30 07:29:04    3b15eb42f8c3df8dd4d51da3aba244755bc8f5ef
+
+diff --git a/sandbox/win/src/app_container_test.cc b/sandbox/win/src/app_container_test.cc
+index 64c22fee40b44..18327a41c1f7b 100644
+--- a/sandbox/win/src/app_container_test.cc
++++ b/sandbox/win/src/app_container_test.cc
+@@ -295,8 +295,7 @@ TEST_F(AppContainerTest, NoCapabilities) {
+ 
+   EXPECT_EQ(SBOX_ALL_OK, policy_->GetConfig()->SetTokenLevel(USER_UNPROTECTED,
+                                                              USER_UNPROTECTED));
+-  EXPECT_EQ(SBOX_ALL_OK,
+-            policy_->GetConfig()->SetJobLevel(JobLevel::kUnprotected, 0));
++  EXPECT_EQ(SBOX_ALL_OK, policy_->GetConfig()->SetJobLevel(JobLevel::kNone, 0));
+ 
+   CreateProcess();
+   auto security_capabilities = container_->GetSecurityCapabilities();
+@@ -313,8 +312,7 @@ TEST_F(AppContainerTest, NoCapabilitiesRestricted) {
+ 
+   EXPECT_EQ(SBOX_ALL_OK, policy_->GetConfig()->SetTokenLevel(
+                              USER_RESTRICTED_SAME_ACCESS, USER_LOCKDOWN));
+-  EXPECT_EQ(SBOX_ALL_OK,
+-            policy_->GetConfig()->SetJobLevel(JobLevel::kUnprotected, 0));
++  EXPECT_EQ(SBOX_ALL_OK, policy_->GetConfig()->SetJobLevel(JobLevel::kNone, 0));
+ 
+   CreateProcess();
+   auto security_capabilities = container_->GetSecurityCapabilities();
+@@ -334,8 +332,7 @@ TEST_F(AppContainerTest, WithCapabilities) {
+       base::win::WellKnownCapability::kInternetClientServer);
+   EXPECT_EQ(SBOX_ALL_OK, policy_->GetConfig()->SetTokenLevel(USER_UNPROTECTED,
+                                                              USER_UNPROTECTED));
+-  EXPECT_EQ(SBOX_ALL_OK,
+-            policy_->GetConfig()->SetJobLevel(JobLevel::kUnprotected, 0));
++  EXPECT_EQ(SBOX_ALL_OK, policy_->GetConfig()->SetJobLevel(JobLevel::kNone, 0));
+ 
+   CreateProcess();
+   auto security_capabilities = container_->GetSecurityCapabilities();
+@@ -355,8 +352,7 @@ TEST_F(AppContainerTest, WithCapabilitiesRestricted) {
+       base::win::WellKnownCapability::kInternetClientServer);
+   EXPECT_EQ(SBOX_ALL_OK, policy_->GetConfig()->SetTokenLevel(
+                              USER_RESTRICTED_SAME_ACCESS, USER_LOCKDOWN));
+-  EXPECT_EQ(SBOX_ALL_OK,
+-            policy_->GetConfig()->SetJobLevel(JobLevel::kUnprotected, 0));
++  EXPECT_EQ(SBOX_ALL_OK, policy_->GetConfig()->SetJobLevel(JobLevel::kNone, 0));
+ 
+   CreateProcess();
+   auto security_capabilities = container_->GetSecurityCapabilities();
+@@ -380,8 +376,7 @@ TEST_F(AppContainerTest, WithImpersonationCapabilities) {
+       base::win::WellKnownCapability::kPicturesLibrary);
+   EXPECT_EQ(SBOX_ALL_OK, policy_->GetConfig()->SetTokenLevel(USER_UNPROTECTED,
+                                                              USER_UNPROTECTED));
+-  EXPECT_EQ(SBOX_ALL_OK,
+-            policy_->GetConfig()->SetJobLevel(JobLevel::kUnprotected, 0));
++  EXPECT_EQ(SBOX_ALL_OK, policy_->GetConfig()->SetJobLevel(JobLevel::kNone, 0));
+ 
+   CreateProcess();
+   auto security_capabilities = container_->GetSecurityCapabilities();
+@@ -401,8 +396,7 @@ TEST_F(AppContainerTest, NoCapabilitiesLPAC) {
+   container_->SetEnableLowPrivilegeAppContainer(true);
+   EXPECT_EQ(SBOX_ALL_OK, policy_->GetConfig()->SetTokenLevel(USER_UNPROTECTED,
+                                                              USER_UNPROTECTED));
+-  EXPECT_EQ(SBOX_ALL_OK,
+-            policy_->GetConfig()->SetJobLevel(JobLevel::kUnprotected, 0));
++  EXPECT_EQ(SBOX_ALL_OK, policy_->GetConfig()->SetJobLevel(JobLevel::kNone, 0));
+ 
+   CreateProcess();
+   auto security_capabilities = container_->GetSecurityCapabilities();
+diff --git a/sandbox/win/src/broker_services.cc b/sandbox/win/src/broker_services.cc
+index ceab91e305cb4..061b73955880e 100644
+--- a/sandbox/win/src/broker_services.cc
++++ b/sandbox/win/src/broker_services.cc
+@@ -531,9 +531,6 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
+   if (container)
+     startup_info->SetAppContainer(container);
+ 
+-  // TODO(crbug.com/1428756) remove all calls to HasJob in follow-up CLs.
+-  DCHECK(policy_base->HasJob());
+-
+   if (policy_base->HasJob())
+     startup_info->AddJobToAssociate(policy_base->GetJobHandle());
+ 
+diff --git a/sandbox/win/src/job.cc b/sandbox/win/src/job.cc
+index 552ebd31ac1fc..69da319b1246d 100644
+--- a/sandbox/win/src/job.cc
++++ b/sandbox/win/src/job.cc
+@@ -65,6 +65,9 @@ DWORD Job::Init(JobLevel security_level,
+           JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+       break;
+     }
++    case JobLevel::kNone: {
++      return ERROR_BAD_ARGUMENTS;
++    }
+   }
+ 
+   if (!::SetInformationJobObject(job_handle_.get(),
+diff --git a/sandbox/win/src/job_unittest.cc b/sandbox/win/src/job_unittest.cc
+index 7a90da8c0a6bc..62142702240c8 100644
+--- a/sandbox/win/src/job_unittest.cc
++++ b/sandbox/win/src/job_unittest.cc
+@@ -93,6 +93,11 @@ TEST(JobTest, SecurityLevel) {
+   Job job_unprotected;
+   ASSERT_EQ(static_cast<DWORD>(ERROR_SUCCESS),
+             job_unprotected.Init(JobLevel::kUnprotected, 0, 0));
++
++  // JobLevel::kNone means we run without a job object so Init should fail.
++  Job job_none;
++  ASSERT_EQ(static_cast<DWORD>(ERROR_BAD_ARGUMENTS),
++            job_none.Init(JobLevel::kNone, 0, 0));
+ }
+ 
+ }  // namespace sandbox
+diff --git a/sandbox/win/src/policy_target_test.cc b/sandbox/win/src/policy_target_test.cc
+index f57f2117067b4..4dfb7ea9cd483 100644
+--- a/sandbox/win/src/policy_target_test.cc
++++ b/sandbox/win/src/policy_target_test.cc
+@@ -241,6 +241,15 @@ TEST(PolicyTargetTest, OpenProcess) {
+       << "Opens a process";
+ }
+ 
++TEST(PolicyTargetTest, PolicyBaseNoJobLifetime) {
++  TestRunner runner(JobLevel::kNone, USER_RESTRICTED_SAME_ACCESS,
++                    USER_LOCKDOWN);
++  // TargetPolicy and its SharedMemIPCServer should continue to exist until
++  // the child process dies.
++  EXPECT_EQ(SBOX_TEST_SUCCEEDED, runner.RunTest(L"PolicyTargetTest_thread"))
++      << "Opens the current thread";
++}
++
+ // Sets the desktop for the current thread to be one with a null DACL, then
+ // launches a sandboxed app. Validates that the sandboxed app has access to the
+ // desktop.
+diff --git a/sandbox/win/src/process_policy_test.cc b/sandbox/win/src/process_policy_test.cc
+index e5e215457405f..cf58c52acec5f 100644
+--- a/sandbox/win/src/process_policy_test.cc
++++ b/sandbox/win/src/process_policy_test.cc
+@@ -191,7 +191,7 @@ TEST(ProcessPolicyTest, OpenThread) {
+ // This tests that the CreateThread works with CSRSS not locked down.
+ // In other words, that the interception passes through OK.
+ TEST(ProcessPolicyTest, TestCreateThreadWithCsrss) {
+-  TestRunner runner(JobLevel::kUnprotected, USER_INTERACTIVE, USER_INTERACTIVE);
++  TestRunner runner(JobLevel::kNone, USER_INTERACTIVE, USER_INTERACTIVE);
+   runner.SetDisableCsrss(false);
+   EXPECT_EQ(SBOX_TEST_SUCCEEDED, runner.RunTest(L"Process_CreateThread"));
+ }
+@@ -199,7 +199,7 @@ TEST(ProcessPolicyTest, TestCreateThreadWithCsrss) {
+ // This tests that the CreateThread works with CSRSS locked down.
+ // In other words, that the interception correctly works.
+ TEST(ProcessPolicyTest, TestCreateThreadWithoutCsrss) {
+-  TestRunner runner(JobLevel::kUnprotected, USER_INTERACTIVE, USER_INTERACTIVE);
++  TestRunner runner(JobLevel::kNone, USER_INTERACTIVE, USER_INTERACTIVE);
+   EXPECT_EQ(SBOX_TEST_SUCCEEDED, runner.RunTest(L"Process_CreateThread"));
+ }
+ 
+diff --git a/sandbox/win/src/restricted_token_test.cc b/sandbox/win/src/restricted_token_test.cc
+index fa2f016451b49..360818cc4f52d 100644
+--- a/sandbox/win/src/restricted_token_test.cc
++++ b/sandbox/win/src/restricted_token_test.cc
+@@ -25,7 +25,7 @@ namespace {
+ int RunOpenProcessTest(bool unsandboxed,
+                        bool lockdown_dacl,
+                        DWORD access_mask) {
+-  TestRunner runner(JobLevel::kUnprotected, USER_RESTRICTED_SAME_ACCESS,
++  TestRunner runner(JobLevel::kNone, USER_RESTRICTED_SAME_ACCESS,
+                     USER_LOCKDOWN);
+   auto* config = runner.GetPolicy()->GetConfig();
+   config->SetDelayedIntegrityLevel(INTEGRITY_LEVEL_UNTRUSTED);
+@@ -38,7 +38,7 @@ int RunOpenProcessTest(bool unsandboxed,
+   // This spins up a renderer level process, we don't care about the result.
+   runner.RunTest(L"IntegrationTestsTest_args 1");
+ 
+-  TestRunner runner2(JobLevel::kUnprotected, USER_RESTRICTED_SAME_ACCESS,
++  TestRunner runner2(JobLevel::kNone, USER_RESTRICTED_SAME_ACCESS,
+                      USER_LIMITED);
+   auto* config2 = runner2.GetPolicy()->GetConfig();
+   config2->SetDelayedIntegrityLevel(INTEGRITY_LEVEL_LOW);
+@@ -56,8 +56,7 @@ int RunOpenProcessTest(bool unsandboxed,
+ int RunRestrictedOpenProcessTest(bool unsandboxed,
+                                  bool lockdown_dacl,
+                                  DWORD access_mask) {
+-  TestRunner runner(JobLevel::kUnprotected, USER_RESTRICTED_SAME_ACCESS,
+-                    USER_LIMITED);
++  TestRunner runner(JobLevel::kNone, USER_RESTRICTED_SAME_ACCESS, USER_LIMITED);
+   auto* config = runner.GetPolicy()->GetConfig();
+   config->SetDelayedIntegrityLevel(INTEGRITY_LEVEL_LOW);
+   ResultCode result = config->SetIntegrityLevel(INTEGRITY_LEVEL_LOW);
+@@ -72,7 +71,7 @@ int RunRestrictedOpenProcessTest(bool unsandboxed,
+   // This spins up a GPU level process, we don't care about the result.
+   runner.RunTest(L"IntegrationTestsTest_args 1");
+ 
+-  TestRunner runner2(JobLevel::kUnprotected, USER_RESTRICTED_SAME_ACCESS,
++  TestRunner runner2(JobLevel::kNone, USER_RESTRICTED_SAME_ACCESS,
+                      USER_LIMITED);
+   auto* config2 = runner2.GetPolicy()->GetConfig();
+   config2->SetDelayedIntegrityLevel(INTEGRITY_LEVEL_LOW);
+@@ -88,8 +87,7 @@ int RunRestrictedOpenProcessTest(bool unsandboxed,
+ }
+ 
+ int RunRestrictedSelfOpenProcessTest(bool add_random_sid, DWORD access_mask) {
+-  TestRunner runner(JobLevel::kUnprotected, USER_RESTRICTED_SAME_ACCESS,
+-                    USER_LIMITED);
++  TestRunner runner(JobLevel::kNone, USER_RESTRICTED_SAME_ACCESS, USER_LIMITED);
+   auto* config = runner.GetPolicy()->GetConfig();
+   config->SetDelayedIntegrityLevel(INTEGRITY_LEVEL_LOW);
+   ResultCode result = config->SetIntegrityLevel(INTEGRITY_LEVEL_LOW);
+@@ -182,7 +180,7 @@ TEST(RestrictedTokenTest, OpenLowPrivilegedProcess) {
+ }
+ 
+ TEST(RestrictedTokenTest, CheckNonAdminRestricted) {
+-  TestRunner runner(JobLevel::kUnprotected, USER_RESTRICTED_SAME_ACCESS,
++  TestRunner runner(JobLevel::kNone, USER_RESTRICTED_SAME_ACCESS,
+                     USER_RESTRICTED_NON_ADMIN);
+   EXPECT_EQ(SBOX_TEST_SUCCEEDED,
+             runner.RunTest(L"RestrictedTokenTest_IsRestricted"));
+diff --git a/sandbox/win/src/sandbox_policy_base.cc b/sandbox/win/src/sandbox_policy_base.cc
+index 2faf389d09011..b19e39aa339c5 100644
+--- a/sandbox/win/src/sandbox_policy_base.cc
++++ b/sandbox/win/src/sandbox_policy_base.cc
+@@ -394,6 +394,9 @@ TokenLevel ConfigBase::GetLockdownTokenLevel() const {
+ }
+ 
+ ResultCode ConfigBase::SetJobLevel(JobLevel job_level, uint32_t ui_exceptions) {
++  if (memory_limit_ && job_level == JobLevel::kNone) {
++    return SBOX_ERROR_BAD_PARAMS;
++  }
+   job_level_ = job_level;
+   ui_exceptions_ = ui_exceptions;
+   return SBOX_ALL_OK;
+@@ -522,6 +525,9 @@ ResultCode PolicyBase::InitJob() {
+   if (job_.IsValid())
+     return SBOX_ERROR_BAD_PARAMS;
+ 
++  if (config()->GetJobLevel() == JobLevel::kNone)
++    return SBOX_ALL_OK;
++
+   // Create the Windows job object.
+   DWORD result = job_.Init(config()->GetJobLevel(), config()->ui_exceptions(),
+                            config()->memory_limit());
+diff --git a/sandbox/win/src/sandbox_policy_diagnostic.cc b/sandbox/win/src/sandbox_policy_diagnostic.cc
+index b6a5874adab7f..96a1ffe0e23f2 100644
+--- a/sandbox/win/src/sandbox_policy_diagnostic.cc
++++ b/sandbox/win/src/sandbox_policy_diagnostic.cc
+@@ -83,6 +83,8 @@ std::string GetJobLevelInEnglish(JobLevel job) {
+       return "Interactive";
+     case JobLevel::kUnprotected:
+       return "Unprotected";
++    case JobLevel::kNone:
++      return "None";
+   }
+ }
+ 
+diff --git a/sandbox/win/src/sandbox_policy_diagnostic.h b/sandbox/win/src/sandbox_policy_diagnostic.h
+index 17564e86c3137..e2498135393cb 100644
+--- a/sandbox/win/src/sandbox_policy_diagnostic.h
++++ b/sandbox/win/src/sandbox_policy_diagnostic.h
+@@ -43,7 +43,7 @@ class PolicyDiagnostic final : public PolicyInfo {
+   std::unique_ptr<std::string> json_string_;
+   uint32_t process_id_;
+   TokenLevel lockdown_level_ = USER_LAST;
+-  JobLevel job_level_ = JobLevel::kUnprotected;
++  JobLevel job_level_ = JobLevel::kNone;
+   IntegrityLevel desired_integrity_level_ = INTEGRITY_LEVEL_LAST;
+   MitigationFlags desired_mitigations_ = 0;
+   std::optional<base::win::Sid> app_container_sid_;
+diff --git a/sandbox/win/src/security_level.h b/sandbox/win/src/security_level.h
+index 288d2baea917c..1b2f009579a6f 100644
+--- a/sandbox/win/src/security_level.h
++++ b/sandbox/win/src/security_level.h
+@@ -95,6 +95,9 @@ enum TokenLevel {
+ //  JobLevel        |General                            |Quota               |
+ //                  |restrictions                       |restrictions        |
+ // -----------------|---------------------------------- |--------------------|
++// kNone            | No job is assigned to the         | None               |
++//                  | sandboxed process.                |                    |
++// -----------------|---------------------------------- |--------------------|
+ // kUnprotected     | None                              | *Kill on Job close.|
+ // -----------------|---------------------------------- |--------------------|
+ // kInteractive     | *Forbid system-wide changes using |                    |
+@@ -120,7 +123,13 @@ enum TokenLevel {
+ // In the context of the above table, 'user handles' refers to the handles of
+ // windows, bitmaps, menus, etc. Files, treads and registry handles are kernel
+ // handles and are not affected by the job level settings.
+-enum class JobLevel { kLockdown = 0, kLimitedUser, kInteractive, kUnprotected };
++enum class JobLevel {
++  kLockdown = 0,
++  kLimitedUser,
++  kInteractive,
++  kUnprotected,
++  kNone
++};
+ 
+ // These flags correspond to various process-level mitigations (eg. ASLR and
+ // DEP). Most are implemented via UpdateProcThreadAttribute() plus flags for
+diff --git a/sandbox/win/tests/integration_tests/integration_tests_test.cc b/sandbox/win/tests/integration_tests/integration_tests_test.cc
+index ba69add1d58c2..cd169a20b8fd7 100644
+--- a/sandbox/win/tests/integration_tests/integration_tests_test.cc
++++ b/sandbox/win/tests/integration_tests/integration_tests_test.cc
+@@ -170,11 +170,13 @@ SBOX_TESTS_COMMAND int IntegrationTestsTest_memory(int argc, wchar_t** argv) {
+ }
+ 
+ // Creates a job and tries to run a process inside it. The function can be
+-// called with up to two parameters. The process runs with JobLevel::kLockdown
+-// level. If a parameter is provided then the JOB_OBJECT_LIMIT_BREAKAWAY_OK
+-// flag should be set on the job object created in this function. The return
+-// value is either SBOX_TEST_SUCCEEDED if the test has passed or a value between
+-// 0 and 4 indicating which part of the test has failed.
++// called with up to two parameters. The first one if set to "none" means that
++// the child process should be run with the JobLevel::kNone JobLevel else it is
++// run with JobLevel::kLockdown level. The second if present specifies that the
++// JOB_OBJECT_LIMIT_BREAKAWAY_OK flag should be set on the job object created
++// in this function. The return value is either SBOX_TEST_SUCCEEDED if the test
++// has passed or a value between 0 and 4 indicating which part of the test has
++// failed.
+ SBOX_TESTS_COMMAND int IntegrationTestsTest_job(int argc, wchar_t **argv) {
+   HANDLE job = ::CreateJobObject(NULL, NULL);
+   if (!job)
+@@ -185,9 +187,9 @@ SBOX_TESTS_COMMAND int IntegrationTestsTest_job(int argc, wchar_t **argv) {
+                                    &job_limits, sizeof(job_limits), NULL)) {
+     return 1;
+   }
+-  // We cheat here and assume no 1st parameter means no breakaway flag and any
+-  // value for the first param means with breakaway flag.
+-  if (argc > 0) {
++  // We cheat here and assume no 2-nd parameter means no breakaway flag and any
++  // value for the second param means with breakaway flag.
++  if (argc > 1) {
+     job_limits.BasicLimitInformation.LimitFlags |=
+         JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+   } else {
+@@ -201,8 +203,11 @@ SBOX_TESTS_COMMAND int IntegrationTestsTest_job(int argc, wchar_t **argv) {
+   if (!::AssignProcessToJobObject(job, ::GetCurrentProcess()))
+     return 3;
+ 
+-  TestRunner runner(JobLevel::kLockdown, USER_RESTRICTED_SAME_ACCESS,
+-                    USER_LOCKDOWN);
++  JobLevel job_level = JobLevel::kLockdown;
++  if (argc > 0 && wcscmp(argv[0], L"none") == 0)
++    job_level = JobLevel::kNone;
++
++  TestRunner runner(job_level, USER_RESTRICTED_SAME_ACCESS, USER_LOCKDOWN);
+   runner.SetTimeout(TestTimeouts::action_timeout());
+ 
+   if (1 != runner.RunTest(L"IntegrationTestsTest_args 1"))
+@@ -265,13 +270,22 @@ TEST(IntegrationTestsTest, WaitForStuckChild) {
+   ASSERT_TRUE(runner.WaitForAllTargets());
+ }
+ 
++std::unique_ptr<TestRunner> StuckChildrenRunner() {
++  auto runner = std::make_unique<TestRunner>(
++      JobLevel::kNone, USER_RESTRICTED_SAME_ACCESS, USER_LOCKDOWN);
++  runner->SetTimeout(TestTimeouts::action_timeout());
++  runner->SetAsynchronous(true);
++  runner->SetKillOnDestruction(false);
++  return runner;
++}
++
+ // Running from inside job that allows us to escape from it should be ok.
+ TEST(IntegrationTestsTest, RunChildFromInsideJob) {
+   TestRunner runner;
+   runner.SetUnsandboxed(true);
+   runner.SetTimeout(TestTimeouts::action_timeout());
+   ASSERT_EQ(SBOX_TEST_SUCCEEDED,
+-            runner.RunTest(L"IntegrationTestsTest_job escape_flag"));
++            runner.RunTest(L"IntegrationTestsTest_job with_job escape_flag"));
+ }
+ 
+ // Running from inside job that doesn't allow us to escape from it should fail
+@@ -280,7 +294,18 @@ TEST(IntegrationTestsTest, RunChildFromInsideJobNoEscape) {
+   TestRunner runner;
+   runner.SetUnsandboxed(true);
+   runner.SetTimeout(TestTimeouts::action_timeout());
+-  ASSERT_EQ(SBOX_TEST_SUCCEEDED, runner.RunTest(L"IntegrationTestsTest_job"));
++  ASSERT_EQ(SBOX_TEST_SUCCEEDED,
++            runner.RunTest(L"IntegrationTestsTest_job with_job"));
++}
++
++// Running without a job object should be ok regardless of the fact that we are
++// running inside an outer job.
++TEST(IntegrationTestsTest, RunJoblessChildFromInsideJob) {
++  TestRunner runner;
++  runner.SetUnsandboxed(true);
++  runner.SetTimeout(TestTimeouts::action_timeout());
++  ASSERT_EQ(SBOX_TEST_SUCCEEDED,
++            runner.RunTest(L"IntegrationTestsTest_job none"));
+ }
+ 
+ // GetPolicyDiagnostics validation

@@ -1,0 +1,18 @@
+commit 5d2c773882d6662c8cbe613d077f6fd048ad98bd
+Author: John Doe <jdoe@email.com>
+Date:   Sun Feb 11 23:48:06 2024 +0800
+
+    win7dep: Remove WMI.Antivirus metrics    2023-02-24 00:03:54    0d90c70857828cf293ca3d7d432ff8ed2f82f5dc
+
+diff --git a/tools/metrics/histograms/metadata/enterprise/histograms.xml b/tools/metrics/histograms/metadata/enterprise/histograms.xml
+index 90d44bf956b49..53d491bb8e22f 100644
+--- a/tools/metrics/histograms/metadata/enterprise/histograms.xml
++++ b/tools/metrics/histograms/metadata/enterprise/histograms.xml
+@@ -2814,6 +2814,7 @@ chromium-metrics-reviews@google.com.
+     Captures the response parsing error rate whenever collecting {Signal}.
+   </summary>
+   <token key="Signal">
++    <variant name="WMI.AntiVirus" summary="AntiVirus info from WMI"/>
+     <variant name="WMI.Hotfixes" summary="Hotfixes info from WMI"/>
+     <variant name="WSC.AntiVirus" summary="AntiVirus info from WSC"/>
+   </token>

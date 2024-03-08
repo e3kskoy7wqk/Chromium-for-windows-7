@@ -1,0 +1,33 @@
+commit 59b2d6ea8df69fef582e512b3384b0d56d868382
+Author: John Doe <jdoe@email.com>
+Date:   Sun Feb 11 23:45:18 2024 +0800
+
+    Remove GDI text support    2023-05-09 23:09:05    027c71073dcc5cd59e221a326f553d2fc771ab9b
+
+diff --git a/skia/BUILD.gn b/skia/BUILD.gn
+index 7501833779338..a06504d375c4e 100644
+--- a/skia/BUILD.gn
++++ b/skia/BUILD.gn
+@@ -437,6 +437,7 @@ component("skia") {
+   if (is_win) {
+     # See SK_TYPEFACE_FACTORY_DIRECTWRITE
+     sources += [
++      "//third_party/skia/src/ports/SkFontHost_win.cpp",
+       "//third_party/skia/src/ports/SkFontMgr_win_dw.cpp",
+       "//third_party/skia/src/ports/SkOSFile_win.cpp",
+       "//third_party/skia/src/ports/SkRemotableFontMgr_win_dw.cpp",
+diff --git a/ui/gfx/win/direct_write.cc b/ui/gfx/win/direct_write.cc
+index cf0f70a55333a..57c05b887ae47 100644
+--- a/ui/gfx/win/direct_write.cc
++++ b/ui/gfx/win/direct_write.cc
+@@ -61,7 +61,9 @@ void InitializeDirectWrite() {
+ 
+   sk_sp<SkFontMgr> direct_write_font_mgr =
+       SkFontMgr_New_DirectWrite(factory.Get());
+-  CHECK(!!direct_write_font_mgr);
++  if (!direct_write_font_mgr) {
++    direct_write_font_mgr = SkFontMgr_New_GDI();
++  }
+ 
+   // Override the default skia font manager. This must be called before any
+   // use of the skia font manager is done (e.g. before any call to

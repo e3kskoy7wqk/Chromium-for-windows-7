@@ -1,0 +1,32 @@
+commit 092ad85de0b484781df22a2d0bf7d9d033cede9b
+Author: John Doe <jdoe@email.com>
+Date:   Sun Feb 11 23:48:01 2024 +0800
+
+    win7dep: update obsolete win version string    2023-02-24 08:01:54    635955e06deb13e0608faef263fc51d0d2c1f73b
+
+diff --git a/chrome/app/chromium_strings.grd b/chrome/app/chromium_strings.grd
+index 1bb0b265bd3c8..0cd767b5b1699 100644
+--- a/chrome/app/chromium_strings.grd
++++ b/chrome/app/chromium_strings.grd
+@@ -625,7 +625,7 @@ Permissions you've already given to websites and apps may apply to this account.
+           Installation failed due to unspecified error. Please download Chromium again.
+         </message>
+         <message name="IDS_INSTALL_OS_NOT_SUPPORTED" desc="Error displayed if OS is not supported">
+-          Chromium requires Windows 10 or higher.
++          Chromium requires Windows 7 or higher.
+         </message>
+         <message name="IDS_INSTALL_OS_ERROR" desc="Error displayed when any Windows API call fails and we do not have more specific information.">
+           An operating system error occurred during installation. Please download Chromium again.
+diff --git a/chrome/app/google_chrome_strings.grd b/chrome/app/google_chrome_strings.grd
+index bf13589361339..3d22d8fc7e160 100644
+--- a/chrome/app/google_chrome_strings.grd
++++ b/chrome/app/google_chrome_strings.grd
+@@ -602,7 +602,7 @@ Permissions you've already given to websites and apps may apply to this account.
+           Installation failed due to unspecified error. Please download Google Chrome again.
+         </message>
+         <message name="IDS_INSTALL_OS_NOT_SUPPORTED" desc="Error displayed if OS is not supported">
+-          Google Chrome requires Windows 10 or higher.
++          Google Chrome requires Windows 7 or higher.
+         </message>
+         <message name="IDS_INSTALL_OS_ERROR" desc="Error displayed when any Windows API call fails and we do not have more specific information.">
+           An operating system error occurred during installation. Please download Google Chrome again.
