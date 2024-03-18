@@ -1,0 +1,253 @@
+
+
+diff --git a/base/BUILD.gn b/base/BUILD.gn
+index 7ebcc036bf122..0714c8b61a5b8 100644
+--- a/base/BUILD.gn
++++ b/base/BUILD.gn
+@@ -4246,7 +4246,6 @@ if (enable_nocompile_tests) {
+       "test/bind_test_nocompile.nc",
+       "thread_annotations_nocompile.nc",
+       "traits_bag_nocompile.nc",
+-      "types/pass_key_nocompile.nc",
+       "types/variant_util_nocompile.nc",
+       "unsafe_buffers_nocompile.nc",
+       "values_nocompile.nc",
+diff --git a/base/types/pass_key.h b/base/types/pass_key.h
+index 6684ffad2b81a..d7b057975f916 100644
+--- a/base/types/pass_key.h
++++ b/base/types/pass_key.h
+@@ -37,6 +37,7 @@ namespace base {
+ template <typename T>
+ class PassKey {
+   friend T;
++ public:
+   PassKey() = default;
+ };
+ 
+diff --git a/chrome/browser/ui/views/elevation_icon_setter.cc b/chrome/browser/ui/views/elevation_icon_setter.cc
+index dbd09d2b24c36..71cd82dd19c34 100644
+--- a/chrome/browser/ui/views/elevation_icon_setter.cc
++++ b/chrome/browser/ui/views/elevation_icon_setter.cc
+@@ -21,66 +21,3 @@
+ #endif
+ 
+ 
+-// Helpers --------------------------------------------------------------------
+-
+-namespace {
+-
+-#if BUILDFLAG(IS_WIN)
+-SkBitmap GetElevationIcon() {
+-  if (!base::win::UserAccountControlIsEnabled())
+-    return SkBitmap();
+-
+-  SHSTOCKICONINFO icon_info = { sizeof(SHSTOCKICONINFO) };
+-  if (FAILED(SHGetStockIconInfo(SIID_SHIELD, SHGSI_ICON | SHGSI_SMALLICON,
+-                                &icon_info)))
+-    return SkBitmap();
+-
+-  SkBitmap icon = IconUtil::CreateSkBitmapFromHICON(
+-      icon_info.hIcon,
+-      gfx::Size(GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON)));
+-  DestroyIcon(icon_info.hIcon);
+-  return icon;
+-}
+-#endif
+-
+-}  // namespace
+-
+-
+-// ElevationIconSetter --------------------------------------------------------
+-
+-ElevationIconSetter::ElevationIconSetter(views::LabelButton* button,
+-                                         base::OnceClosure callback)
+-    : button_(button) {
+-#if BUILDFLAG(IS_WIN)
+-  base::ThreadPool::CreateCOMSTATaskRunner(
+-      {base::MayBlock(), base::TaskPriority::USER_BLOCKING})
+-      ->PostTaskAndReplyWithResult(
+-          FROM_HERE, base::BindOnce(&GetElevationIcon),
+-          base::BindOnce(&ElevationIconSetter::SetButtonIcon,
+-                         weak_factory_.GetWeakPtr(), std::move(callback)));
+-#endif
+-}
+-
+-ElevationIconSetter::~ElevationIconSetter() {
+-}
+-
+-void ElevationIconSetter::SetButtonIcon(base::OnceClosure callback,
+-                                        const SkBitmap& icon) {
+-  if (!icon.isNull()) {
+-    float device_scale_factor = 1.0f;
+-#if BUILDFLAG(IS_WIN)
+-    // Windows gives us back a correctly-scaled image for the current DPI, so
+-    // mark this image as having been scaled for the current DPI already.
+-    device_scale_factor = display::win::GetDPIScale();
+-#endif
+-    button_->SetImageModel(
+-        views::Button::STATE_NORMAL,
+-        ui::ImageModel::FromImageSkia(
+-            gfx::ImageSkia::CreateFromBitmap(icon, device_scale_factor)));
+-    button_->SizeToPreferredSize();
+-    if (button_->parent())
+-      button_->parent()->DeprecatedLayoutImmediately();
+-    if (!callback.is_null())
+-      std::move(callback).Run();
+-  }
+-}
+diff --git a/chrome/browser/ui/views/elevation_icon_setter.h b/chrome/browser/ui/views/elevation_icon_setter.h
+index 79ea5dc0d0cd5..e7b0bbb8b7c23 100644
+--- a/chrome/browser/ui/views/elevation_icon_setter.h
++++ b/chrome/browser/ui/views/elevation_icon_setter.h
+@@ -8,13 +8,58 @@
+ #include "base/functional/callback_forward.h"
+ #include "base/memory/raw_ptr.h"
+ #include "base/memory/weak_ptr.h"
++#include "base/types/pass_key.h"
++
++#include "chrome/browser/ui/views/elevation_icon_setter.h"
++
++#include "base/functional/bind.h"
++#include "base/functional/callback.h"
++#include "base/task/thread_pool.h"
++#include "build/build_config.h"
++#include "third_party/skia/include/core/SkBitmap.h"
++#include "ui/views/controls/button/label_button.h"
++
++#if BUILDFLAG(IS_WIN)
++#include <windows.h>
++#include <shellapi.h>
++
++#include "base/win/win_util.h"
++#include "ui/display/win/dpi.h"
++#include "ui/gfx/icon_util.h"
++#endif
+ 
+ class SkBitmap;
+ 
+ namespace views {
++class View;
+ class LabelButton;
+ }
+ 
++// Helpers --------------------------------------------------------------------
++
++namespace {
++
++#if BUILDFLAG(IS_WIN)
++SkBitmap GetElevationIcon() {
++  if (!base::win::UserAccountControlIsEnabled())
++    return SkBitmap();
++
++  SHSTOCKICONINFO icon_info = { sizeof(SHSTOCKICONINFO) };
++  if (FAILED(SHGetStockIconInfo(SIID_SHIELD, SHGSI_ICON | SHGSI_SMALLICON,
++                                &icon_info)))
++    return SkBitmap();
++
++  SkBitmap icon = IconUtil::CreateSkBitmapFromHICON(
++      icon_info.hIcon,
++      gfx::Size(GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON)));
++  DestroyIcon(icon_info.hIcon);
++  return icon;
++}
++#endif
++
++}  // namespace
++
++
+ // On Windows, badges a button with a "UAC shield" icon to indicate that
+ // clicking will trigger a UAC elevation prompt.  Does nothing on other
+ // platforms.
+@@ -24,15 +69,51 @@ class ElevationIconSetter {
+   // |callback| will be called if the button icon is actually changed; callers
+   // should pass a function which does a relayout on the view containing the
+   // button, to ensure the button is correctly resized as necessary.
+-  ElevationIconSetter(views::LabelButton* button, base::OnceClosure callback);
++  template <typename Callback>
++  ElevationIconSetter(views::LabelButton* button, Callback callback)
++    : button_(button) {
++#if BUILDFLAG(IS_WIN)
++  base::ThreadPool::CreateCOMSTATaskRunner(
++      {base::MayBlock(), base::TaskPriority::USER_BLOCKING})
++      ->PostTaskAndReplyWithResult(
++          FROM_HERE, base::BindOnce(&GetElevationIcon),
++          base::BindOnce(&ElevationIconSetter::SetButtonIcon<Callback>,
++                         weak_factory_.GetWeakPtr(), std::move(callback)));
++#endif
++}
+ 
+   ElevationIconSetter(const ElevationIconSetter&) = delete;
+   ElevationIconSetter& operator=(const ElevationIconSetter&) = delete;
+ 
+-  ~ElevationIconSetter();
++  ~ElevationIconSetter() {
++}
+ 
+  private:
+-  void SetButtonIcon(base::OnceClosure callback, const SkBitmap& icon);
++  template <typename Callback>
++  void SetButtonIcon(Callback callback, const SkBitmap& icon) {
++  if (!icon.isNull()) {
++    float device_scale_factor = 1.0f;
++#if BUILDFLAG(IS_WIN)
++    // Windows gives us back a correctly-scaled image for the current DPI, so
++    // mark this image as having been scaled for the current DPI already.
++    device_scale_factor = display::win::GetDPIScale();
++#endif
++    button_->SetImageModel(
++        views::Button::STATE_NORMAL,
++        ui::ImageModel::FromImageSkia(
++            gfx::ImageSkia::CreateFromBitmap(icon, device_scale_factor)));
++    button_->SizeToPreferredSize();
++    if (button_->parent())
++      button_->parent()->DeprecatedLayoutImmediately();
++    if (!callback.is_null()) {
++      if constexpr (std::is_same_v<Callback, base::OnceCallback<void (base::PassKey<views::View>)>>) {
++        std::move(callback).Run(base::PassKey<views::View>{});
++      } else {
++        std::move(callback).Run();
++      }
++    }
++  }
++}
+ 
+   raw_ptr<views::LabelButton> button_;
+   base::WeakPtrFactory<ElevationIconSetter> weak_factory_{this};
+diff --git a/ui/views/BUILD.gn b/ui/views/BUILD.gn
+index 707fc6e855a28..d6a816bea0e2c 100644
+--- a/ui/views/BUILD.gn
++++ b/ui/views/BUILD.gn
+@@ -1578,15 +1578,15 @@ test("views_unittests") {
+   }
+ 
+   if (enable_nocompile_tests) {
+-    deps += [ ":views_nocompile_tests" ]
++    # deps += [ ":views_nocompile_tests" ]
+   }
+ }
+ 
+ if (enable_nocompile_tests) {
+-  nocompile_source_set("views_nocompile_tests") {
+-    sources = [ "view_nocompile.nc" ]
+-    deps = [ ":views" ]
+-  }
++  # nocompile_source_set("views_nocompile_tests") {
++    # sources = [ "view_nocompile.nc" ]
++    # deps = [ ":views" ]
++  # }
+ }
+ 
+ # This target is added as a dependency of browser interactive_ui_tests. It must
+diff --git a/ui/views/view.h b/ui/views/view.h
+index 379f585795e6a..831c0a8b3afdb 100644
+--- a/ui/views/view.h
++++ b/ui/views/view.h
+@@ -294,7 +294,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
+   ADVANCED_MEMORY_SAFETY_CHECKS();
+ 
+  public:
+-  using PassKey = base::NonCopyablePassKey<View>;
++  using PassKey = base::PassKey<View>;
+   using Views = std::vector<raw_ptr<View, VectorExperimental>>;
+ 
+   // TODO(crbug.com/1289902): The |event| parameter is being removed. Do not add

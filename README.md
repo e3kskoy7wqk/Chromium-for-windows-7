@@ -14,7 +14,7 @@ Windows 7, 8, 10, 11.
 
 1. Follow the steps in [the instructions on how to get the code](https://chromium.googlesource.com/chromium/src/+/refs/tags/122.0.6261.34/docs/windows_build_instructions.md) until the command `autoninja -C out\Default chrome`. 
 
-   **Note**: These patches have only been tested on Chromium versions 122.0.6261.34, 123.0.6312.16 and 124.0.6338.2, and may not work on other versions. Therefore, you may need to use 'git checkout' to switch to the corresponding Chromium version.
+   **Note**: These patches have only been tested on Chromium versions 122.0.6261.34, 122.0.6261.116, 123.0.6312.16, 123.0.6312.32, 124.0.6338.2, 124.0.6341.0, 124.0.6345.0, 124.0.6349.1, 124.0.6352.2 and 124.0.6365.1, and may not work on other versions. Therefore, you may need to use 'git checkout' to switch to the corresponding Chromium version.
 
    **Note**: Make sure to disable chromium's clang plugin, as failing to do so will result in a failed compilation due to incompatibility between the patch and a certain chromium's clang plugin. To disable chromium's clang plugin, simply set `clang_use_chrome_plugins = false` in your args.gn.
 
