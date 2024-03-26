@@ -1,0 +1,1 @@
+[win] Fix DWM transitions for inactive windows    2023-07-12 05:31:24    738fe871783e8e90bde132cd7014a3be2ec8fb00

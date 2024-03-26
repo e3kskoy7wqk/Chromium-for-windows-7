@@ -1,0 +1,25 @@
+
+
+diff --git a/base/process/process_win.cc b/base/process/process_win.cc
+index 9a414d886f779..30bf9ba0b379e 100644
+--- a/base/process/process_win.cc
++++ b/base/process/process_win.cc
+@@ -270,6 +270,9 @@ bool Process::SetPriority(Priority priority) {
+                                    ? IDLE_PRIORITY_CLASS
+                                    : NORMAL_PRIORITY_CLASS;
+ 
++  static const auto set_process_information_fn =
++      reinterpret_cast<decltype(&::SetProcessInformation)>(::GetProcAddress(
++          ::GetModuleHandle(L"Kernel32.dll"), "SetProcessInformation"));
+   if (base::win::OSInfo::GetInstance()->version() >=
+           base::win::Version::WIN11 &&
+       FeatureList::IsEnabled(kUseEcoQoSForBackgroundProcess)) {
+@@ -287,7 +290,7 @@ bool Process::SetPriority(Priority priority) {
+       power_throttling.StateMask = 0;
+     }
+     bool ret =
+-        ::SetProcessInformation(Handle(), ProcessPowerThrottling,
++        set_process_information_fn(Handle(), ProcessPowerThrottling,
+                                 &power_throttling, sizeof(power_throttling));
+     if (ret == 0) {
+       DPLOG(ERROR) << "Setting process QoS policy fails";
