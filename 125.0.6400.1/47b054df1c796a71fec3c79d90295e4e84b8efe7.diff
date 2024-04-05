@@ -1,0 +1,216 @@
+
+
+diff --git a/chrome/browser/about_flags.cc b/chrome/browser/about_flags.cc
+index 7b85e6167daeb..a14074617d7e9 100644
+--- a/chrome/browser/about_flags.cc
++++ b/chrome/browser/about_flags.cc
+@@ -326,6 +326,7 @@
+ #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_ASH)
+ 
+ #if BUILDFLAG(IS_WIN)
++#include "base/win/windows_version.h"
+ #include "chrome/browser/enterprise/platform_auth/platform_auth_features.h"
+ #include "chrome/browser/win/titlebar_config.h"
+ #endif
+@@ -11269,6 +11270,14 @@ bool ShouldSkipConditionalFeatureEntry(const flags_ui::FlagsStorage* storage,
+            channel != version_info::Channel::UNKNOWN;
+   }
+ #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
++#if BUILDFLAG(IS_WIN)
++  // HDR mode works, but displays everything horribly wrong prior to windows 10.
++  if (!strcmp("enable-hdr", entry.internal_name) &&
++      base::win::GetVersion() < base::win::Version::WIN10) {
++    return true;
++  }
++#endif  // BUILDFLAG(IS_WIN)
++
+   if (flags::IsFlagExpired(storage, entry.internal_name)) {
+     return true;
+   }
+diff --git a/chrome/browser/accessibility/caption_settings_dialog_win.cc b/chrome/browser/accessibility/caption_settings_dialog_win.cc
+index 3807d7ccece91..2fb5a4cdb2e86 100644
+--- a/chrome/browser/accessibility/caption_settings_dialog_win.cc
++++ b/chrome/browser/accessibility/caption_settings_dialog_win.cc
+@@ -9,13 +9,16 @@
+ 
+ #include "base/functional/bind.h"
+ #include "base/task/thread_pool.h"
++#include "base/win/windows_version.h"
+ 
+ namespace {
+ 
+ // A helper callback that opens the caption settings dialog.
+ void CaptionSettingsDialogCallback() {
+-  ShellExecute(nullptr, L"open", L"ms-settings:easeofaccess-closedcaptioning",
+-               nullptr, nullptr, SW_SHOWNORMAL);
++  if (base::win::GetVersion() >= base::win::Version::WIN10) {
++    ShellExecute(NULL, L"open", L"ms-settings:easeofaccess-closedcaptioning",
++                 NULL, NULL, SW_SHOWNORMAL);
++  }
+ }
+ 
+ }  // namespace
+diff --git a/chrome/browser/device_reauth/win/authenticator_win.cc b/chrome/browser/device_reauth/win/authenticator_win.cc
+index 2be4217b0e9e2..d433aa4124c7c 100644
+--- a/chrome/browser/device_reauth/win/authenticator_win.cc
++++ b/chrome/browser/device_reauth/win/authenticator_win.cc
+@@ -21,6 +21,7 @@
+ #include "base/win/registry.h"
+ #include "base/win/scoped_hstring.h"
+ #include "base/win/scoped_winrt_initializer.h"
++#include "base/win/windows_version.h"
+ #include "chrome/browser/password_manager/password_manager_util_win.h"
+ #include "chrome/browser/ui/browser.h"
+ #include "chrome/browser/ui/browser_finder.h"
+@@ -94,6 +95,11 @@ void ReportCantCheckAvailability(
+ void GetBiometricAvailabilityFromWindows(
+     AvailabilityCallback callback,
+     scoped_refptr<base::SequencedTaskRunner> thread) {
++  // UserConsentVerifier class is only available in Win 10 onwards.
++  if (base::win::GetVersion() < base::win::Version::WIN10) {
++    ReportCantCheckAvailability(thread, std::move(callback));
++    return;
++  }
+   if (!ResolveCoreWinRT()) {
+     ReportCantCheckAvailability(thread, std::move(callback));
+     return;
+diff --git a/chrome/browser/external_protocol/external_protocol_handler_browsertest.cc b/chrome/browser/external_protocol/external_protocol_handler_browsertest.cc
+index e728a435d92e6..70bff7ffe90dd 100644
+--- a/chrome/browser/external_protocol/external_protocol_handler_browsertest.cc
++++ b/chrome/browser/external_protocol/external_protocol_handler_browsertest.cc
+@@ -22,6 +22,10 @@
+ #include "content/public/test/navigation_handle_observer.h"
+ #include "content/public/test/test_navigation_observer.h"
+ 
++#if BUILDFLAG(IS_WIN)
++#include "base/win/windows_version.h"
++#endif
++
+ class ExternalProtocolHandlerBrowserTest : public InProcessBrowserTest {
+  public:
+   content::WebContents* web_content() {
+@@ -156,6 +160,14 @@ class TabAddedRemovedObserver : public TabStripModelObserver {
+ #endif
+ IN_PROC_BROWSER_TEST_F(ExternalProtocolHandlerBrowserTest,
+                        MAYBE_AutoCloseTabOnNonWebProtocolNavigation) {
++#if BUILDFLAG(IS_WIN)
++  // On Win 7 the protocol is registered to be handled by Chrome and thus never
++  // reaches the ExternalProtocolHandler so we skip the test. For
++  // more info see installer/util/shell_util.cc:GetShellIntegrationEntries
++  if (base::win::GetVersion() < base::win::Version::WIN8)
++    return;
++#endif
++
+   TabAddedRemovedObserver observer(browser()->tab_strip_model());
+   ASSERT_EQ(browser()->tab_strip_model()->count(), 1);
+   ASSERT_TRUE(
+@@ -173,6 +185,14 @@ IN_PROC_BROWSER_TEST_F(ExternalProtocolHandlerBrowserTest,
+ #endif
+ IN_PROC_BROWSER_TEST_F(ExternalProtocolHandlerBrowserTest,
+                        MAYBE_ProtocolLaunchEmitsConsoleLog) {
++#if BUILDFLAG(IS_WIN)
++  // On Win 7 the protocol is registered to be handled by Chrome and thus never
++  // reaches the ExternalProtocolHandler so we skip the test. For
++  // more info see installer/util/shell_util.cc:GetShellIntegrationEntries
++  if (base::win::GetVersion() < base::win::Version::WIN8)
++    return;
++#endif
++
+   content::WebContentsConsoleObserver observer(web_content());
+   // Wait for either "Launched external handler..." or "Failed to launch..."; the former will pass
+   // the test, while the latter will fail it more quickly than waiting for a timeout.
+diff --git a/chrome/browser/icon_loader_browsertest.cc b/chrome/browser/icon_loader_browsertest.cc
+index 4e09d38e417e5..052248024e25b 100644
+--- a/chrome/browser/icon_loader_browsertest.cc
++++ b/chrome/browser/icon_loader_browsertest.cc
+@@ -13,6 +13,7 @@
+ #include "ui/gfx/image/image.h"
+ 
+ #if BUILDFLAG(IS_WIN)
++#include "base/win/windows_version.h"
+ #include "ui/display/win/dpi.h"
+ #endif
+ 
+@@ -70,6 +71,11 @@ IN_PROC_BROWSER_TEST_F(IconLoaderBrowserTest, LoadGroup) {
+ 
+ #if BUILDFLAG(IS_WIN)
+   scale = display::win::GetDPIScale();
++
++  // This test times out on Win7. Return early to avoid disabling test on
++  // all of Windows.
++  if (base::win::GetVersion() <= base::win::Version::WIN7)
++    return;
+ #endif
+ 
+   // Test that an icon for a file type (group) can be loaded even
+diff --git a/chrome/browser/importer/edge_importer_browsertest_win.cc b/chrome/browser/importer/edge_importer_browsertest_win.cc
+index a595b7b9cace7..acb0675ec1ac7 100644
+--- a/chrome/browser/importer/edge_importer_browsertest_win.cc
++++ b/chrome/browser/importer/edge_importer_browsertest_win.cc
+@@ -163,6 +163,10 @@ class EdgeImporterBrowserTest : public InProcessBrowserTest {
+ };
+ 
+ IN_PROC_BROWSER_TEST_F(EdgeImporterBrowserTest, EdgeImporter) {
++  // Only verified to work with ESE library on Windows 8.1 and above.
++  if (base::win::GetVersion() < base::win::Version::WIN8_1)
++    return;
++
+   const BookmarkInfo kEdgeBookmarks[] = {
+       {true,
+        2,
+@@ -283,6 +287,10 @@ IN_PROC_BROWSER_TEST_F(EdgeImporterBrowserTest, EdgeImporterLegacyFallback) {
+ }
+ 
+ IN_PROC_BROWSER_TEST_F(EdgeImporterBrowserTest, EdgeImporterNoDatabase) {
++  // Only verified to work with ESE library on Windows 8.1 and above.
++  if (base::win::GetVersion() < base::win::Version::WIN8_1)
++    return;
++
+   std::vector<BookmarkInfo> bookmark_entries;
+   std::vector<FaviconGroup> favicon_groups;
+ 
+diff --git a/chrome/browser/media/webrtc/webrtc_browsertest_base.cc b/chrome/browser/media/webrtc/webrtc_browsertest_base.cc
+index 2e8853171953c..2adee4138fc17 100644
+--- a/chrome/browser/media/webrtc/webrtc_browsertest_base.cc
++++ b/chrome/browser/media/webrtc/webrtc_browsertest_base.cc
+@@ -33,6 +33,11 @@
+ #include "extensions/browser/extension_registry.h"
+ #include "net/test/embedded_test_server/embedded_test_server.h"
+ 
++#if BUILDFLAG(IS_WIN)
++// For fine-grained suppression.
++#include "base/win/windows_version.h"
++#endif
++
+ const char WebRtcTestBase::kAudioVideoCallConstraints[] =
+     "{audio: true, video: true}";
+ const char WebRtcTestBase::kVideoCallConstraintsQVGA[] =
+@@ -478,6 +483,14 @@ std::string WebRtcTestBase::GetStreamSize(
+   return result.substr(3);
+ }
+ 
++bool WebRtcTestBase::OnWin8OrHigher() const {
++#if BUILDFLAG(IS_WIN)
++  return base::win::GetVersion() >= base::win::Version::WIN8;
++#else
++  return false;
++#endif
++}
++
+ void WebRtcTestBase::OpenDatabase(content::WebContents* tab) const {
+   EXPECT_EQ("ok-database-opened", ExecuteJavascript("openDatabase()", tab));
+ }
+diff --git a/chrome/browser/media/webrtc/webrtc_browsertest_base.h b/chrome/browser/media/webrtc/webrtc_browsertest_base.h
+index 725a869468d12..38ac2c9a28ec9 100644
+--- a/chrome/browser/media/webrtc/webrtc_browsertest_base.h
++++ b/chrome/browser/media/webrtc/webrtc_browsertest_base.h
+@@ -205,6 +205,9 @@ class WebRtcTestBase : public InProcessBrowserTest {
+   std::string GetStreamSize(content::WebContents* tab_contents,
+                             const std::string& video_element) const;
+ 
++  // Returns true if we're on Windows 8 or higher.
++  bool OnWin8OrHigher() const;
++
+   void OpenDatabase(content::WebContents* tab) const;
+   void CloseDatabase(content::WebContents* tab) const;
+   void DeleteDatabase(content::WebContents* tab) const;

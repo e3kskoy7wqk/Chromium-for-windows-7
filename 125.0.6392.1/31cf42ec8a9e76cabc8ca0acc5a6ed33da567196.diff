@@ -1,0 +1,14 @@
+
+
+diff --git a/ui/views/win/hwnd_message_handler.cc b/ui/views/win/hwnd_message_handler.cc
+index 9aa6789ba2d38..b71ede2f4b44a 100644
+--- a/ui/views/win/hwnd_message_handler.cc
++++ b/ui/views/win/hwnd_message_handler.cc
+@@ -3491,7 +3491,6 @@ void HWNDMessageHandler::PerformDwmTransition() {
+ 
+   dwm_transition_desired_ = false;
+   delegate_->HandleFrameChanged();
+-  SendFrameChanged();
+ }
+ 
+ void HWNDMessageHandler::UpdateDwmFrame() {

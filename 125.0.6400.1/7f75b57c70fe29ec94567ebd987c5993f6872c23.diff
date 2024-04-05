@@ -1,0 +1,320 @@
+
+
+diff --git a/chrome/browser/web_applications/os_integration/os_integration_manager.cc b/chrome/browser/web_applications/os_integration/os_integration_manager.cc
+index e07f28b9c73ea..75e01bfba92b0 100644
+--- a/chrome/browser/web_applications/os_integration/os_integration_manager.cc
++++ b/chrome/browser/web_applications/os_integration/os_integration_manager.cc
+@@ -52,6 +52,10 @@
+ #include "chrome/browser/web_applications/app_shim_registry_mac.h"
+ #endif
+ 
++#if BUILDFLAG(IS_WIN)
++#include "base/win/windows_version.h"
++#endif
++
+ namespace web_app {
+ 
+ namespace {
+diff --git a/chrome/browser/web_applications/os_integration/protocol_handling_sub_manager.cc b/chrome/browser/web_applications/os_integration/protocol_handling_sub_manager.cc
+index 3db3dea47d085..d3e81633cd4e4 100644
+--- a/chrome/browser/web_applications/os_integration/protocol_handling_sub_manager.cc
++++ b/chrome/browser/web_applications/os_integration/protocol_handling_sub_manager.cc
+@@ -5,7 +5,6 @@
+ #include "chrome/browser/web_applications/os_integration/protocol_handling_sub_manager.h"
+ 
+ #include <memory>
+-#include <string>
+ #include <utility>
+ #include <vector>
+ 
+@@ -24,6 +23,10 @@
+ #include "components/services/app_service/public/cpp/protocol_handler_info.h"
+ #include "url/gurl.h"
+ 
++#if BUILDFLAG(IS_WIN)
++#include "base/win/windows_version.h"
++#endif
++
+ namespace web_app {
+ 
+ namespace {
+@@ -58,7 +61,18 @@ void ProtocolHandlingSubManager::Configure(
+     const webapps::AppId& app_id,
+     proto::WebAppOsIntegrationState& desired_state,
+     base::OnceClosure configure_done) {
++  // Disable protocol handler unregistration on Win7 due to bad interactions
++  // between preinstalled app scenarios and the need for elevation to unregister
++  // protocol handlers on that platform. See crbug.com/1224327 for context.
++#if BUILDFLAG(IS_WIN)
++  if (base::win::GetVersion() == base::win::Version::WIN7) {
++    std::move(configure_done).Run();
++    return;
++  }
++#endif
++
+   DCHECK(!desired_state.has_protocols_handled());
++
+   if (!provider_->registrar_unsafe().IsLocallyInstalled(app_id)) {
+     std::move(configure_done).Run();
+     return;
+diff --git a/chrome/browser/web_applications/os_integration/web_app_file_handler_registration_win_unittest.cc b/chrome/browser/web_applications/os_integration/web_app_file_handler_registration_win_unittest.cc
+index 1e1404aac8039..07e62aea4adb2 100644
+--- a/chrome/browser/web_applications/os_integration/web_app_file_handler_registration_win_unittest.cc
++++ b/chrome/browser/web_applications/os_integration/web_app_file_handler_registration_win_unittest.cc
+@@ -18,6 +18,7 @@
+ #include "base/test/bind.h"
+ #include "base/test/test_reg_util_win.h"
+ #include "base/test/test_timeouts.h"
++#include "base/win/windows_version.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/profiles/profile_attributes_storage.h"
+ #include "chrome/browser/profiles/profile_manager.h"
+@@ -152,8 +153,10 @@ class WebAppFileHandlerRegistrationWinTest : public testing::Test {
+       const std::string& sanitized_app_name) {
+     base::FilePath app_specific_launcher_filepath(
+         base::ASCIIToWide(sanitized_app_name));
+-    app_specific_launcher_filepath =
+-        app_specific_launcher_filepath.AddExtension(L"exe");
++    if (base::win::GetVersion() > base::win::Version::WIN7) {
++      app_specific_launcher_filepath =
++          app_specific_launcher_filepath.AddExtension(L"exe");
++    }
+     return app_specific_launcher_filepath;
+   }
+ 
+diff --git a/chrome/browser/web_applications/os_integration/web_app_handler_registration_utils_win.cc b/chrome/browser/web_applications/os_integration/web_app_handler_registration_utils_win.cc
+index 9e5fd9a855574..b9d0324e6f11c 100644
+--- a/chrome/browser/web_applications/os_integration/web_app_handler_registration_utils_win.cc
++++ b/chrome/browser/web_applications/os_integration/web_app_handler_registration_utils_win.cc
+@@ -17,6 +17,7 @@
+ #include "base/strings/string_util.h"
+ #include "base/strings/utf_string_conversions.h"
+ #include "base/task/thread_pool.h"
++#include "base/win/windows_version.h"
+ #include "chrome/browser/browser_process.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/profiles/profile_attributes_entry.h"
+@@ -158,10 +159,10 @@ std::wstring GetProgId(const base::FilePath& profile_path,
+     // Provided file extensions must have a leading period. This is enforced
+     // to ensure that calls to this function have consistent syntax (and
+     // therefore get the same prog_id for a given set of inputs).
+-    DCHECK_EQ(iter->at(0), '.');
++    DCHECK(iter->at(0) == '.');
+     string_to_hash += *iter;
+     while (++iter != file_extensions->end()) {
+-      DCHECK_EQ(iter->at(0), '.');
++      DCHECK(iter->at(0) == '.');
+       string_to_hash += ";";
+       string_to_hash += *iter;
+     }
+@@ -203,6 +204,15 @@ base::FilePath GetAppSpecificLauncherFilename(const std::wstring& app_name) {
+   base::FilePath::StringType sanitized_app_name =
+       internals::GetSanitizedFileName(base::AsString16(app_name)).value();
+ 
++  // On Windows 7, where the launcher has no file extension, replace any '.'
++  // characters with '_' to prevent a portion of the filename from being
++  // interpreted as its extension.
++  const bool is_win_7 = base::win::GetVersion() == base::win::Version::WIN7;
++  if (is_win_7) {
++    base::ReplaceChars(sanitized_app_name, FILE_PATH_LITERAL("."),
++                       FILE_PATH_LITERAL("_"), &sanitized_app_name);
++  }
++
+   // If |sanitized_app_name| is a reserved filename, prepend '_' to allow its
+   // use as the launcher filename (e.g. "nul" => "_nul"). Prepending is
+   // preferred over appending in order to handle filenames containing '.', as
+@@ -212,9 +222,14 @@ base::FilePath GetAppSpecificLauncherFilename(const std::wstring& app_name) {
+   if (net::IsReservedNameOnWindows(sanitized_app_name))
+     sanitized_app_name.insert(0, 1, FILE_PATH_LITERAL('_'));
+ 
+-  // Add .exe extension.
+-  return base::FilePath(sanitized_app_name)
+-      .AddExtension(FILE_PATH_LITERAL("exe"));
++  // On Windows 8+, add .exe extension. On Windows 7, where an app's display
++  // name in the Open With menu can't be set programmatically, omit the
++  // extension to use the launcher filename as the app's display name.
++  if (!is_win_7) {
++    return base::FilePath(sanitized_app_name)
++        .AddExtension(FILE_PATH_LITERAL("exe"));
++  }
++  return base::FilePath(sanitized_app_name);
+ }
+ 
+ // See https://docs.microsoft.com/en-us/windows/win32/com/-progid--key for
+diff --git a/chrome/browser/web_applications/os_integration/web_app_handler_registration_utils_win_unittest.cc b/chrome/browser/web_applications/os_integration/web_app_handler_registration_utils_win_unittest.cc
+index 75d0b76cd2fea..299d088f12d56 100644
+--- a/chrome/browser/web_applications/os_integration/web_app_handler_registration_utils_win_unittest.cc
++++ b/chrome/browser/web_applications/os_integration/web_app_handler_registration_utils_win_unittest.cc
+@@ -14,6 +14,7 @@
+ #include "base/test/bind.h"
+ #include "base/test/test_reg_util_win.h"
+ #include "base/win/registry.h"
++#include "base/win/windows_version.h"
+ #include "chrome/browser/profiles/profile_attributes_entry.h"
+ #include "chrome/browser/profiles/profile_attributes_storage.h"
+ #include "chrome/browser/profiles/profile_manager.h"
+@@ -114,11 +115,15 @@ class WebAppHandlerRegistrationUtilsWinTest : public testing::Test {
+                   "Web Applications\\_crx_app_id\\app_name.ico"))));
+ 
+     // Ensure that the launcher file contains the expected app name.
++    // On Windows 7 the extension is omitted.
++    base::FilePath expected_launcher_filename =
++        base::win::GetVersion() > base::win::Version::WIN7
++            ? base::FilePath(expected_user_visible_app_name.append(L".exe"))
++            : base::FilePath(expected_user_visible_app_name);
+     base::FilePath registered_launcher_path =
+         ShellUtil::GetApplicationPathForProgId(app_progid);
+     ASSERT_TRUE(base::PathExists(registered_launcher_path));
+-    EXPECT_EQ(registered_launcher_path.BaseName(),
+-              base::FilePath(expected_user_visible_app_name.append(L".exe")));
++    EXPECT_EQ(expected_launcher_filename, registered_launcher_path.BaseName());
+   }
+ 
+  private:
+@@ -293,26 +298,54 @@ TEST_F(WebAppHandlerRegistrationUtilsWinTest, CreateAppLauncherFile) {
+   EXPECT_TRUE(launcher_path.has_value());
+   EXPECT_TRUE(base::PathExists(launcher_path.value()));
+ 
++  // On Windows 7 the extension is omitted.
+   std::wstring expected_user_visible_app_name(app_name());
+   expected_user_visible_app_name.append(app_name_extension);
+-  EXPECT_EQ(launcher_path.value().BaseName(),
+-            base::FilePath(expected_user_visible_app_name.append(L".exe")));
++  base::FilePath expected_launcher_filename =
++      base::win::GetVersion() > base::win::Version::WIN7
++          ? base::FilePath(expected_user_visible_app_name.append(L".exe"))
++          : base::FilePath(expected_user_visible_app_name);
++  EXPECT_EQ(launcher_path.value().BaseName(), expected_launcher_filename);
+ }
+ 
+ // Test that invalid file name characters in app_name are replaced with ' '.
+ TEST_F(WebAppHandlerRegistrationUtilsWinTest, AppNameWithInvalidChars) {
+   // '*' is an invalid char in Windows file names, so it should be replaced
+   // with ' '.
+-  EXPECT_EQ(GetAppSpecificLauncherFilename(L"app*name"),
+-            base::FilePath(L"app name.exe"));
++  std::wstring app_name = L"app*name";
++  // On Windows 7 the extension is omitted.
++  base::FilePath expected_launcher_name =
++      base::win::GetVersion() > base::win::Version::WIN7
++          ? base::FilePath(L"app name.exe")
++          : base::FilePath(L"app name");
++  EXPECT_EQ(GetAppSpecificLauncherFilename(app_name), expected_launcher_name);
+ }
+ 
+ // Test that an app name that is a reserved filename on Windows has '_'
+ // prepended to it when used as a filename for its launcher.
+ TEST_F(WebAppHandlerRegistrationUtilsWinTest, AppNameIsReservedFilename) {
+   // "con" is a reserved filename on Windows, so it should have '_' prepended.
+-  EXPECT_EQ(GetAppSpecificLauncherFilename(L"con"),
+-            base::FilePath(L"_con.exe"));
++  std::wstring app_name = L"con";
++  // On Windows 7 the extension is omitted.
++  base::FilePath expected_launcher_name =
++      base::win::GetVersion() > base::win::Version::WIN7
++          ? base::FilePath(L"_con.exe")
++          : base::FilePath(L"_con");
++  EXPECT_EQ(GetAppSpecificLauncherFilename(app_name), expected_launcher_name);
++}
++
++// Test that an app name containing '.' characters has them replaced with '_' on
++// Windows 7 when used as a filename for its launcher.
++TEST_F(WebAppHandlerRegistrationUtilsWinTest, AppNameContainsDot) {
++  std::wstring app_name = L"some.app.name";
++
++  // "some.app.name" should become "some_app_name" on Windows 7 and the
++  // extension is also omitted.
++  base::FilePath expected_launcher_name =
++      base::win::GetVersion() > base::win::Version::WIN7
++          ? base::FilePath(L"some.app.name.exe")
++          : base::FilePath(L"some_app_name");
++  EXPECT_EQ(GetAppSpecificLauncherFilename(app_name), expected_launcher_name);
+ }
+ 
+ }  // namespace web_app
+diff --git a/chrome/browser/web_applications/os_integration/web_app_protocol_handler_registration_win_unittest.cc b/chrome/browser/web_applications/os_integration/web_app_protocol_handler_registration_win_unittest.cc
+index ff2d83e3452dc..22c81bb4d22d7 100644
+--- a/chrome/browser/web_applications/os_integration/web_app_protocol_handler_registration_win_unittest.cc
++++ b/chrome/browser/web_applications/os_integration/web_app_protocol_handler_registration_win_unittest.cc
+@@ -15,6 +15,7 @@
+ #include "base/test/bind.h"
+ #include "base/test/test_reg_util_win.h"
+ #include "base/win/registry.h"
++#include "base/win/windows_version.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/profiles/profile_attributes_storage.h"
+ #include "chrome/browser/profiles/profile_manager.h"
+@@ -170,12 +171,19 @@ class WebAppProtocolHandlerRegistrationWinTest : public testing::Test {
+ 
+ TEST_F(WebAppProtocolHandlerRegistrationWinTest,
+        AddAndVerifyProtocolAssociations) {
++  // App protocol handlers are not supported on Windows 7.
++  if (base::win::GetVersion() <= base::win::Version::WIN7)
++    return;
+   AddAndVerifyProtocolAssociations(kApp1Id, kApp1Name, kApp1Url, GetProfile(),
+                                    "");
+ }
+ 
+ TEST_F(WebAppProtocolHandlerRegistrationWinTest,
+        RegisterMultipleHandlersWithSameScheme) {
++  // App protocol handlers are not supported on Windows 7.
++  if (base::win::GetVersion() <= base::win::Version::WIN7)
++    return;
++
+   AddAndVerifyProtocolAssociations(kApp1Id, kApp1Name, kApp1Url, GetProfile(),
+                                    "");
+   AddAndVerifyProtocolAssociations(kApp2Id, kApp2Name, kApp2Url, GetProfile(),
+@@ -187,6 +195,10 @@ TEST_F(WebAppProtocolHandlerRegistrationWinTest,
+ // the profile name, e.g., "app name (Default)" and "app name (Profile 2)".
+ TEST_F(WebAppProtocolHandlerRegistrationWinTest,
+        RegisterProtocolHandlersForWebAppIn2Profiles) {
++  // App protocol handlers are not supported on Windows 7.
++  if (base::win::GetVersion() <= base::win::Version::WIN7)
++    return;
++
+   AddAndVerifyProtocolAssociations(kApp1Id, kApp1Name, kApp1Url, GetProfile(),
+                                    "");
+ 
+@@ -227,6 +239,10 @@ TEST_F(WebAppProtocolHandlerRegistrationWinTest,
+ // registered app name.
+ TEST_F(WebAppProtocolHandlerRegistrationWinTest,
+        UnRegisterProtocolHandlersForWebAppIn2Profiles) {
++  // App protocol handlers are not supported on Windows 7.
++  if (base::win::GetVersion() <= base::win::Version::WIN7)
++    return;
++
+   AddAndVerifyProtocolAssociations(kApp1Id, kApp1Name, kApp1Url, GetProfile(),
+                                    "");
+   base::FilePath app_specific_launcher_path =
+@@ -280,6 +296,10 @@ TEST_F(WebAppProtocolHandlerRegistrationWinTest,
+ // registry settings and the app-specific launcher.
+ TEST_F(WebAppProtocolHandlerRegistrationWinTest,
+        UnregisterProtocolHandlersForWebApp) {
++  // App protocol handlers are not supported on Windows 7.
++  if (base::win::GetVersion() <= base::win::Version::WIN7)
++    return;
++
+   AddAndVerifyProtocolAssociations(kApp1Id, kApp1Name, kApp1Url, GetProfile(),
+                                    "");
+   base::FilePath app_specific_launcher_path =
+diff --git a/chrome/browser/web_applications/os_integration/web_app_shortcut_win_unittest.cc b/chrome/browser/web_applications/os_integration/web_app_shortcut_win_unittest.cc
+index dcb19126b0681..46ffd5405c675 100644
+--- a/chrome/browser/web_applications/os_integration/web_app_shortcut_win_unittest.cc
++++ b/chrome/browser/web_applications/os_integration/web_app_shortcut_win_unittest.cc
+@@ -17,6 +17,7 @@
+ #include "base/strings/utf_string_conversions.h"
+ #include "base/test/scoped_path_override.h"
+ #include "base/win/shortcut.h"
++#include "base/win/windows_version.h"
+ #include "chrome/browser/web_applications/os_integration/web_app_shortcut.h"
+ #include "chrome/browser/web_applications/test/web_app_test.h"
+ #include "chrome/common/chrome_switches.h"
+@@ -106,6 +107,8 @@ TEST_F(WebAppShortcutWinTest, GetShortcutPaths) {
+       ShellUtil::SHORTCUT_LOCATION_DESKTOP,
+       ShellUtil::SHORTCUT_LOCATION_START_MENU_CHROME_APPS_DIR,
+       ShellUtil::SHORTCUT_LOCATION_STARTUP};
++  if (base::win::GetVersion() < base::win::Version::WIN10)
++    expected_locations.push_back(ShellUtil::SHORTCUT_LOCATION_QUICK_LAUNCH);
+ 
+   base::FilePath expected_result;
+   for (const auto& location : expected_locations) {
