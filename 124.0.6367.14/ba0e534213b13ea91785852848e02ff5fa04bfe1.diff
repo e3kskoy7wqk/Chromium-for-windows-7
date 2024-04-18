@@ -258,6 +258,20 @@ index f612b49c97cd5..2be4217b0e9e2 100644
      ReportCantCheckAvailability(thread, std::move(callback));
      return;
    }
+@@ -220,6 +220,13 @@ void PerformWindowsHelloAuthenticationAsync(
+     base::OnceCallback<void(bool)> callback,
+     scoped_refptr<base::SequencedTaskRunner> thread,
+     const std::u16string& message) {
++  if (!ResolveCoreWinRT()) {
++    RecordWindowsHelloAuthenticationResult(
++        AuthenticationResultStatusWin::kFailedToCreateFactory);
++    AuthenticateWithLegacyApi(message, std::move(callback));
++    return;
++  }
++
+   ComPtr<IUserConsentVerifierStatics> factory;
+   HRESULT hr = base::win::GetActivationFactory<
+       IUserConsentVerifierStatics,
 diff --git a/chrome/browser/enterprise/platform_auth/cloud_ap_provider_win.cc b/chrome/browser/enterprise/platform_auth/cloud_ap_provider_win.cc
 index 0d8e3ab500ac0..5784afe6e5856 100644
 --- a/chrome/browser/enterprise/platform_auth/cloud_ap_provider_win.cc
