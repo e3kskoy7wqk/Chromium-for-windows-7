@@ -1,0 +1,164 @@
+diff --git a/media/audio/audio_output_resampler.cc b/media/audio/audio_output_resampler.cc
+index 179c304955ef9..8e0ff9efb43a5 100644
+--- a/media/audio/audio_output_resampler.cc
++++ b/media/audio/audio_output_resampler.cc
+@@ -179,9 +179,7 @@ enum class OpenStreamResult {
+   kFallbackToLinearSuccess = 7,
+   kSubsequentFail = 8,
+   kSubsequentSuccess = 9,
+-  kFallbackToLowLatencySuccess = 10,
+-  kOffloadSuccess = 11,
+-  kMaxValue = kOffloadSuccess,
++  kMaxValue = kSubsequentSuccess,
+ };
+ 
+ OpenStreamResult GetSubsequentStreamCreationResultBucket(
+@@ -189,9 +187,7 @@ OpenStreamResult GetSubsequentStreamCreationResultBucket(
+     bool success) {
+   switch (current_params.format()) {
+     case AudioParameters::AUDIO_PCM_LOW_LATENCY:
+-      return success ? (current_params.RequireOffload()
+-                            ? OpenStreamResult::kOffloadSuccess
+-                            : OpenStreamResult::kSubsequentSuccess)
++      return success ? OpenStreamResult::kSubsequentSuccess
+                      : OpenStreamResult::kSubsequentFail;
+     case AudioParameters::AUDIO_PCM_LINEAR:
+       return success ? OpenStreamResult::kFallbackToLinearSuccess
+@@ -290,11 +286,11 @@ bool AudioOutputResampler::OpenStream() {
+   }
+ 
+   constexpr char kFallbackHistogramName[] =
+-      "Media.FallbackToHighLatencyAudioPath2";
++      "Media.FallbackToHighLatencyAudioPath";
+   constexpr char kOpenLowLatencyHistogramName[] =
+-      "Media.AudioOutputResampler.OpenLowLatencyStream2";
++      "Media.AudioOutputResampler.OpenLowLatencyStream";
+   constexpr char kOpenLowLatencyOffloadHistogramName[] =
+-      "Media.AudioOutputResampler.OpenLowLatencyStream2.Offload";
++      "Media.AudioOutputResampler.OpenLowLatencyStream.Offload";
+ 
+   if (dispatcher_->OpenStream()) {
+     // Only record the UMA statistic if we didn't fallback during construction
+@@ -307,9 +303,7 @@ bool AudioOutputResampler::OpenStream() {
+       base::UmaHistogramEnumeration(
+           kOpenLowLatencyHistogramName,
+           first_stream
+-              ? (original_output_params_.RequireOffload()
+-                     ? OpenStreamResult::kOffloadSuccess
+-                     : OpenStreamResult::kSuccess)
++              ? OpenStreamResult::kSuccess
+               : GetSubsequentStreamCreationResultBucket(output_params_, true));
+     }
+     return true;
+@@ -336,6 +330,8 @@ bool AudioOutputResampler::OpenStream() {
+     return false;
+   }
+ 
++  base::UmaHistogramBoolean(kFallbackHistogramName, true);
++
+   // Only Windows has a high latency output driver that is not the same as the
+   // low latency path; or it may originally be attempted to be initialized in
+   // offload mode while rejected later due to resource limitation.
+@@ -354,16 +350,13 @@ bool AudioOutputResampler::OpenStream() {
+     if (output_params_.IsValid()) {
+       dispatcher_ = MakeDispatcher(device_id_, output_params_);
+       if (dispatcher_->OpenStream()) {
+-        base::UmaHistogramEnumeration(
+-            kOpenLowLatencyHistogramName,
+-            OpenStreamResult::kFallbackToLowLatencySuccess);
++        base::UmaHistogramEnumeration(kOpenLowLatencyHistogramName,
++                                      OpenStreamResult::kFallbackToLinear);
+         return true;
+       }
+     }
+   }
+ 
+-  base::UmaHistogramBoolean(kFallbackHistogramName, true);
+-
+   DLOG(ERROR) << "Unable to open audio device in low latency mode.  Falling "
+               << "back to high latency audio output.";
+ 
+diff --git a/testing/variations/fieldtrial_testing_config.json b/testing/variations/fieldtrial_testing_config.json
+index 6abb02a59d174..38a53ff4884fa 100644
+--- a/testing/variations/fieldtrial_testing_config.json
++++ b/testing/variations/fieldtrial_testing_config.json
+@@ -1114,21 +1114,6 @@
+             ]
+         }
+     ],
+-    "AudioOffload": [
+-        {
+-            "platforms": [
+-                "windows"
+-            ],
+-            "experiments": [
+-                {
+-                    "name": "Enabled",
+-                    "enable_features": [
+-                        "AudioOffload"
+-                    ]
+-                }
+-            ]
+-        }
+-    ],
+     "AudioRendererAlgorithmStartingCapacityForEncrypted": [
+         {
+             "platforms": [
+diff --git a/tools/metrics/histograms/metadata/media/enums.xml b/tools/metrics/histograms/metadata/media/enums.xml
+index a883ed704e702..9572bcf3d7f6c 100644
+--- a/tools/metrics/histograms/metadata/media/enums.xml
++++ b/tools/metrics/histograms/metadata/media/enums.xml
+@@ -104,9 +104,6 @@ chromium-metrics-reviews@google.com.
+   <int value="7" label="Subsequent creation of linear stream succeeded"/>
+   <int value="8" label="Subsequent creation of low latency stream failed"/>
+   <int value="9" label="Subsequent creation of low latency stream succeeded"/>
+-  <int value="10" label="Fallback to non-offload low latency stream succeeded"/>
+-  <int value="11"
+-      label="Creation of low latency stream in offload mode succeeded"/>
+ </enum>
+ 
+ <enum name="AudioOutputStreamCreationResult">
+diff --git a/tools/metrics/histograms/metadata/media/histograms.xml b/tools/metrics/histograms/metadata/media/histograms.xml
+index cde39ddd8ac4e..e681ea85e9199 100644
+--- a/tools/metrics/histograms/metadata/media/histograms.xml
++++ b/tools/metrics/histograms/metadata/media/histograms.xml
+@@ -1679,7 +1679,7 @@ chromium-metrics-reviews@google.com.
+   <token key="LatencyTag" variants="AudioLatencyTag"/>
+ </histogram>
+ 
+-<histogram name="Media.AudioOutputResampler.OpenLowLatencyStream2"
++<histogram name="Media.AudioOutputResampler.OpenLowLatencyStream"
+     enum="AudioOutputResamplerLowLatencyOpenStreamResult"
+     expires_after="2024-11-03">
+   <owner>olka@chromium.org</owner>
+@@ -1691,9 +1691,7 @@ chromium-metrics-reviews@google.com.
+     successfully or which type of fallback stream was used instead. In case a
+     fake fallback stream is used it means audio rendered through the resampler
+     will be muted. In case fallback fails entirely, renderer callback error will
+-    be signalled. In case audio output stream is opened in offload mode, record
+-    successful opening in offload mode explicitly to distinguish from
+-    non-offload mode.
++    be signalled.
+   </summary>
+ </histogram>
+ 
+@@ -3501,7 +3499,7 @@ chromium-metrics-reviews@google.com.
+   <token key="EmeApi" variants="EmeApi"/>
+ </histogram>
+ 
+-<histogram name="Media.FallbackToHighLatencyAudioPath2"
++<histogram name="Media.FallbackToHighLatencyAudioPath"
+     enum="BooleanDidFallBack" expires_after="never">
+ <!-- expires-never: Media pipeline health metric. -->
+ 
+@@ -3509,9 +3507,7 @@ chromium-metrics-reviews@google.com.
+   <owner>media-dev-uma@chromium.org</owner>
+   <owner>webrtc-audio-uma@google.com</owner>
+   <summary>
+-    Whether Chrome had to fallback to the high latency audio path or not. The
+-    fallback might be from either low latency offload path, or from low latency
+-    non-offload path.
++    Whether Chrome had to fallback to the high latency audio path or not.
+   </summary>
+ </histogram>
+ 
