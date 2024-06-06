@@ -1,0 +1,33 @@
+
+
+diff --git a/mojo/core/embedder/embedder.cc b/mojo/core/embedder/embedder.cc
+index dca56dd4df86e..de999ee3c7d64 100644
+--- a/mojo/core/embedder/embedder.cc
++++ b/mojo/core/embedder/embedder.cc
+@@ -43,10 +43,5 @@ namespace mojo::core {
+ 
+ namespace {
+ 
+-#if BUILDFLAG(IS_CHROMEOS)
+ std::atomic<bool> g_mojo_ipcz_enabled{false};
+-#else
+-// Default to enabled even if InitFeatures() is never called.
+-std::atomic<bool> g_mojo_ipcz_enabled{true};
+-#endif
+ 
+diff --git a/mojo/core/embedder/features.cc b/mojo/core/embedder/features.cc
+index a3b2ae1b54986..8c788a6581e66 100644
+--- a/mojo/core/embedder/features.cc
++++ b/mojo/core/embedder/features.cc
+@@ -33,11 +33,7 @@ BASE_FEATURE(kMojoInlineMessagePayloads,
+              "MojoInlineMessagePayloads",
+              base::FEATURE_DISABLED_BY_DEFAULT);
+ 
+-#if BUILDFLAG(IS_CHROMEOS)
+ BASE_FEATURE(kMojoIpcz, "MojoIpcz", base::FEATURE_DISABLED_BY_DEFAULT);
+-#else
+-BASE_FEATURE(kMojoIpcz, "MojoIpcz", base::FEATURE_ENABLED_BY_DEFAULT);
+-#endif
+ 
+ BASE_FEATURE(kMojoIpczMemV2,
+              "MojoIpczMemV2",
