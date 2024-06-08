@@ -453,6 +453,21 @@ index c932ad09c40ac..4a99e827cfdef 100644
    Microsoft::WRL::ComPtr<ISystemMediaTransportControlsInterop> interop;
    HRESULT hr = base::win::GetActivationFactory<
        ISystemMediaTransportControlsInterop,
+diff --git a/content/browser/installedapp/native_win_app_fetcher_impl.cc b/content/browser/installedapp/native_win_app_fetcher_impl.cc
+index 28c7aa12464c5..ad3564b97e3ea 100644
+--- a/content/browser/installedapp/native_win_app_fetcher_impl.cc
++++ b/content/browser/installedapp/native_win_app_fetcher_impl.cc
+@@ -45,6 +45,10 @@ void NativeWinAppFetcherImpl::FetchAppsForUrl(
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+   callback_ = std::move(callback);
+ 
++  if (!base::win::ResolveCoreWinRTDelayload()) {
++    return OnFailure();
++  }
++
+   ComPtr<IUriRuntimeClassFactory> url_factory;
+   HRESULT hr =
+       base::win::GetActivationFactory<IUriRuntimeClassFactory,
 diff --git a/device/bluetooth/bluetooth_adapter_winrt.cc b/device/bluetooth/bluetooth_adapter_winrt.cc
 index a7bdfc1fb573a..1a1d46931ad26 100644
 --- a/device/bluetooth/bluetooth_adapter_winrt.cc

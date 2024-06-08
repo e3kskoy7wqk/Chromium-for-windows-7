@@ -464,6 +464,20 @@ index 4a99e827cfdef..a855edb420af1 100644
      return false;
    }
  
+diff --git a/content/browser/installedapp/native_win_app_fetcher_impl.cc b/content/browser/installedapp/native_win_app_fetcher_impl.cc
+index 28c7aa12464c5..ad3564b97e3ea 100644
+--- a/content/browser/installedapp/native_win_app_fetcher_impl.cc
++++ b/content/browser/installedapp/native_win_app_fetcher_impl.cc
+@@ -112,7 +112,8 @@ void NativeWinAppFetcherImpl::FetchAppsForUrl(
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+   callback_ = std::move(callback);
+ 
+-  if (!base::win::ResolveCoreWinRTDelayload()) {
++  if (!base::win::ScopedHString::ResolveCoreWinRTStringDelayload() ||
++      !base::win::ResolveCoreWinRTDelayload()) {
+     return OnFailure();
+   }
+ 
 diff --git a/device/bluetooth/bluetooth_adapter_winrt.cc b/device/bluetooth/bluetooth_adapter_winrt.cc
 index 1a1d46931ad26..0416cd110fe21 100644
 --- a/device/bluetooth/bluetooth_adapter_winrt.cc
