@@ -1,0 +1,1 @@
+Update heap corruption handling to dynamically load RaiseFailFastException function in invalid_access_win.cc

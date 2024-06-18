@@ -1,0 +1,29 @@
+
+
+diff --git a/base/debug/invalid_access_win.cc b/base/debug/invalid_access_win.cc
+index 74682e57813eb..fe1a00f825ed5 100644
+--- a/base/debug/invalid_access_win.cc
++++ b/base/debug/invalid_access_win.cc
+@@ -48,11 +48,20 @@ void IndirectCall(FuncType* func) {
+   (*func)();
+ }
+ 
++typedef void (WINAPI *LPFNRAISEFAILFASTEXCEPTION)(PEXCEPTION_RECORD, PCONTEXT, DWORD);
++
+ void CreateSyntheticHeapCorruption() {
+   EXCEPTION_RECORD record = {};
+   record.ExceptionCode = STATUS_HEAP_CORRUPTION;
+-  RaiseFailFastException(&record, nullptr,
+-                         FAIL_FAST_GENERATE_EXCEPTION_ADDRESS);
++  LPFNRAISEFAILFASTEXCEPTION lpfn;
++  lpfn = (LPFNRAISEFAILFASTEXCEPTION) GetProcAddress(
++                          GetModuleHandle(L"kernel32"),
++                          "RaiseFailFastException");
++  if (!lpfn) {
++    RaiseException(STATUS_HEAP_CORRUPTION, 0L, 0L, NULL);
++  } else {
++    lpfn(&record, nullptr, FAIL_FAST_GENERATE_EXCEPTION_ADDRESS);
++  }
+ }
+ 
+ }  // namespace
