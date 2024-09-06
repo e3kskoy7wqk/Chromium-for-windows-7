@@ -1,0 +1,413 @@
+
+
+diff --git a/chrome/browser/themes/theme_helper_win.cc b/chrome/browser/themes/theme_helper_win.cc
+index 1baa0c0906cfd..19e28adc8faea 100644
+--- a/chrome/browser/themes/theme_helper_win.cc
++++ b/chrome/browser/themes/theme_helper_win.cc
+@@ -7,2 +7,3 @@
+ #include "chrome/browser/win/mica_titlebar.h"
++#include "chrome/browser/win/titlebar_config.h"
+ #include "chrome/grit/theme_resources.h"
+@@ -19,5 +19,6 @@ int ThemeHelperWin::GetDefaultDisplayProperty(int id) const {
+ 
+ bool ThemeHelperWin::ShouldUseNativeFrame(
+     const CustomThemeSupplier* theme_supplier) const {
+-  return true;
++  return !ShouldAlwaysUseSystemTitlebar() ||
++         !HasCustomImage(IDR_THEME_FRAME, theme_supplier);
+ }
+diff --git a/chrome/browser/ui/color/win/native_chrome_color_mixer_win.cc b/chrome/browser/ui/color/win/native_chrome_color_mixer_win.cc
+index 2dcb3beb24703..4c4535d26dc0d 100644
+--- a/chrome/browser/ui/color/win/native_chrome_color_mixer_win.cc
++++ b/chrome/browser/ui/color/win/native_chrome_color_mixer_win.cc
+@@ -10,4 +10,5 @@
+ #include "base/functional/bind.h"
+ #include "base/no_destructor.h"
+ #include "base/win/windows_version.h"
++#include "chrome/browser/themes/browser_theme_pack.h"
+ #include "chrome/browser/themes/theme_properties.h"
+@@ -14,2 +14,3 @@
+ #include "chrome/browser/win/mica_titlebar.h"
++#include "chrome/browser/win/titlebar_config.h"
+ #include "chrome/grit/theme_resources.h"
+@@ -46,6 +47,13 @@ class FrameColorHelper {
+   static FrameColorHelper* Get();
+ 
+  private:
++  // Returns whether there is a custom image provided for the given id.
++  bool HasCustomImage(int id, const ui::ColorProviderKey& key) const;
++
++  // Returns true if colors from DWM can be used, i.e. this is a native frame
++  // on Windows 8+.
++  bool DwmColorsAllowed(const ui::ColorProviderKey& key) const;
++
+   // Returns the Tint for the given |id|. If there is no tint, the identity tint
+   // {-1, -1, -1} is returned and won't tint the color on which it is used.
+   color_utils::HSL GetTint(int id, const ui::ColorProviderKey& key) const;
+@@ -90,91 +98,98 @@ void FrameColorHelper::AddNativeChromeColors(
+     return std::nullopt;
+   };
+ 
+-  // When we're custom-drawing the titlebar we want to use either the colors
+-  // we calculated in OnDwmKeyUpdated() or the default colors. When we're not
+-  // custom-drawing the titlebar we want to match the color Windows actually
+-  // uses because some things (like the incognito icon) use this color to
+-  // decide whether they should draw in light or dark mode. Incognito colors
+-  // should be the same as non-incognito in all cases here.
+-
+-  constexpr SkColor kSystemMicaLightFrameColor =
+-      SkColorSetRGB(0xE8, 0xE8, 0xE8);
+-  constexpr SkColor kSystemMicaDarkFrameColor = SkColorSetRGB(0x20, 0x20, 0x20);
+-
+-  // We should only attempt to paint system-style frames if configured to do so
+-  // in the key.
+-  const bool use_native_colors =
+-      (key.frame_type == ui::ColorProviderKey::FrameType::kChromium &&
+-       key.frame_style == ui::ColorProviderKey::FrameStyle::kSystem);
+-
+-  std::optional<ui::ColorTransform> active_frame_transform;
+-  if (auto color = get_theme_color(TP::COLOR_FRAME_ACTIVE)) {
+-    active_frame_transform = {color.value()};
+-  } else if (use_native_colors) {
+-    if (dwm_frame_color_) {
+-      active_frame_transform = {dwm_frame_color_.value()};
+-    } else if (ShouldDefaultThemeUseMicaTitlebar()) {
+-      active_frame_transform = {key.color_mode == ColorMode::kDark
+-                                    ? kSystemMicaDarkFrameColor
+-                                    : kSystemMicaLightFrameColor};
+-    }
+-  }
+-
+-  std::optional<ui::ColorTransform> inactive_frame_transform;
+-  if (auto color = get_theme_color(TP::COLOR_FRAME_INACTIVE)) {
+-    inactive_frame_transform = {color.value()};
+-  } else if (use_native_colors) {
+-    if (dwm_inactive_frame_color_) {
+-      inactive_frame_transform = {dwm_inactive_frame_color_.value()};
+-    } else if (dwm_frame_color_) {
+-      inactive_frame_transform =
+-          ui::HSLShift({dwm_frame_color_.value()},
+-                       GetTint(ThemeProperties::TINT_FRAME_INACTIVE, key));
+-    } else if (ShouldDefaultThemeUseMicaTitlebar()) {
+-      inactive_frame_transform = {key.color_mode == ColorMode::kDark
++  if (DwmColorsAllowed(key)) {
++    // When we're custom-drawing the titlebar we want to use either the colors
++    // we calculated in OnDwmKeyUpdated() or the default colors. When we're not
++    // custom-drawing the titlebar we want to match the color Windows actually
++    // uses because some things (like the incognito icon) use this color to
++    // decide whether they should draw in light or dark mode. Incognito colors
++    // should be the same as non-incognito in all cases here.
++
++    constexpr SkColor kSystemMicaLightFrameColor =
++        SkColorSetRGB(0xE8, 0xE8, 0xE8);
++    constexpr SkColor kSystemMicaDarkFrameColor = SkColorSetRGB(0x20, 0x20, 0x20);
++
++    // We should only attempt to paint system-style frames if configured to do so
++    // in the key.
++    const bool use_native_colors =
++        (key.frame_type == ui::ColorProviderKey::FrameType::kChromium &&
++        key.frame_style == ui::ColorProviderKey::FrameStyle::kSystem);
++
++    std::optional<ui::ColorTransform> active_frame_transform;
++    if (auto color = get_theme_color(TP::COLOR_FRAME_ACTIVE)) {
++      active_frame_transform = {color.value()};
++    } else if (use_native_colors) {
++      if (dwm_frame_color_) {
++        active_frame_transform = {dwm_frame_color_.value()};
++      } else if (ShouldDefaultThemeUseMicaTitlebar()) {
++        active_frame_transform = {key.color_mode == ColorMode::kDark
+                                       ? kSystemMicaDarkFrameColor
+                                       : kSystemMicaLightFrameColor};
++      }
+     }
+-  }
+ 
+-  // If setting custom window frame colors ensure we also update the
+-  // corresponding sys header colors. Although this diverges from chrome's
+-  // material spec these overrides are necessary to ensure UI assigned to these
+-  // color roles can continue to work as expected while respecting platform
+-  // frame overrides.
+-  if (active_frame_transform) {
+-    mixer[ui::kColorFrameActive] = active_frame_transform.value();
+-    mixer[ui::kColorSysHeader] = active_frame_transform.value();
+-    mixer[ui::kColorSysOnHeaderDivider] =
+-        GetColorWithMaxContrast(ui::kColorSysHeader);
+-    mixer[ui::kColorSysOnHeaderPrimary] =
+-        GetColorWithMaxContrast(ui::kColorSysHeader);
+-    mixer[ui::kColorSysStateHeaderHover] =
+-        ui::AlphaBlend(ui::kColorSysBase, ui::kColorSysHeader,
+-                       /* 40% opacity */ 0.4 * SK_AlphaOPAQUE);
+-    mixer[ui::kColorSysHeaderContainer] = {ui::kColorSysBase};
+-  }
+-  if (inactive_frame_transform) {
+-    mixer[ui::kColorFrameInactive] = inactive_frame_transform.value();
+-    mixer[ui::kColorSysHeaderInactive] = inactive_frame_transform.value();
+-    mixer[ui::kColorSysOnHeaderDividerInactive] =
+-        GetColorWithMaxContrast(ui::kColorSysHeaderInactive);
+-    mixer[ui::kColorSysOnHeaderPrimaryInactive] =
+-        GetColorWithMaxContrast(ui::kColorSysHeaderInactive);
+-    mixer[ui::kColorSysStateHeaderHoverInactive] =
+-        ui::AlphaBlend(ui::kColorSysBase, ui::kColorSysHeaderInactive,
+-                       /* 40% opacity */ 0.4 * SK_AlphaOPAQUE);
+-    mixer[ui::kColorSysHeaderContainerInactive] = {ui::kColorSysBase};
+-  }
++    std::optional<ui::ColorTransform> inactive_frame_transform;
++    if (auto color = get_theme_color(TP::COLOR_FRAME_INACTIVE)) {
++      inactive_frame_transform = {color.value()};
++    } else if (use_native_colors) {
++      if (dwm_inactive_frame_color_) {
++        inactive_frame_transform = {dwm_inactive_frame_color_.value()};
++      } else if (dwm_frame_color_) {
++        inactive_frame_transform =
++            ui::HSLShift({dwm_frame_color_.value()},
++                        GetTint(ThemeProperties::TINT_FRAME_INACTIVE, key));
++      } else if (ShouldDefaultThemeUseMicaTitlebar()) {
++        inactive_frame_transform = {key.color_mode == ColorMode::kDark
++                                        ? kSystemMicaDarkFrameColor
++                                        : kSystemMicaLightFrameColor};
++      }
++    }
+ 
+-  if (ShouldDefaultThemeUseMicaTitlebar() && !key.app_controller) {
+-    mixer[kColorNewTabButtonBackgroundFrameActive] = {SK_ColorTRANSPARENT};
+-    mixer[kColorNewTabButtonBackgroundFrameInactive] = {SK_ColorTRANSPARENT};
+-    mixer[kColorNewTabButtonInkDropFrameActive] =
+-        ui::GetColorWithMaxContrast(ui::kColorFrameActive);
+-    mixer[kColorNewTabButtonInkDropFrameInactive] =
+-        ui::GetColorWithMaxContrast(ui::kColorFrameInactive);
+-  }
++    // If setting custom window frame colors ensure we also update the
++    // corresponding sys header colors. Although this diverges from chrome's
++    // material spec these overrides are necessary to ensure UI assigned to these
++    // color roles can continue to work as expected while respecting platform
++    // frame overrides.
++    if (active_frame_transform) {
++      mixer[ui::kColorFrameActive] = active_frame_transform.value();
++      mixer[ui::kColorSysHeader] = active_frame_transform.value();
++      mixer[ui::kColorSysOnHeaderDivider] =
++          GetColorWithMaxContrast(ui::kColorSysHeader);
++      mixer[ui::kColorSysOnHeaderPrimary] =
++          GetColorWithMaxContrast(ui::kColorSysHeader);
++      mixer[ui::kColorSysStateHeaderHover] =
++          ui::AlphaBlend(ui::kColorSysBase, ui::kColorSysHeader,
++                        /* 40% opacity */ 0.4 * SK_AlphaOPAQUE);
++      mixer[ui::kColorSysHeaderContainer] = {ui::kColorSysBase};
++    }
++    if (inactive_frame_transform) {
++      mixer[ui::kColorFrameInactive] = inactive_frame_transform.value();
++      mixer[ui::kColorSysHeaderInactive] = inactive_frame_transform.value();
++      mixer[ui::kColorSysOnHeaderDividerInactive] =
++          GetColorWithMaxContrast(ui::kColorSysHeaderInactive);
++      mixer[ui::kColorSysOnHeaderPrimaryInactive] =
++          GetColorWithMaxContrast(ui::kColorSysHeaderInactive);
++      mixer[ui::kColorSysStateHeaderHoverInactive] =
++          ui::AlphaBlend(ui::kColorSysBase, ui::kColorSysHeaderInactive,
++                        /* 40% opacity */ 0.4 * SK_AlphaOPAQUE);
++      mixer[ui::kColorSysHeaderContainerInactive] = {ui::kColorSysBase};
++    }
++
++    if (ShouldDefaultThemeUseMicaTitlebar() && !key.app_controller) {
++      mixer[kColorNewTabButtonBackgroundFrameActive] = {SK_ColorTRANSPARENT};
++      mixer[kColorNewTabButtonBackgroundFrameInactive] = {SK_ColorTRANSPARENT};
++      mixer[kColorNewTabButtonInkDropFrameActive] =
++          ui::GetColorWithMaxContrast(ui::kColorFrameActive);
++      mixer[kColorNewTabButtonInkDropFrameInactive] =
++          ui::GetColorWithMaxContrast(ui::kColorFrameInactive);
++    }
++  } else {
++    if (auto color = get_theme_color(TP::COLOR_FRAME_ACTIVE))
++      mixer[ui::kColorFrameActive] = {color.value()};
++    if (auto color = get_theme_color(TP::COLOR_FRAME_INACTIVE))
++      mixer[ui::kColorFrameInactive] = {color.value()};
++   }
+ }
+ 
+ void FrameColorHelper::AddBorderAccentColors(ui::ColorMixer& mixer) const {
+@@ -198,6 +213,19 @@ FrameColorHelper* FrameColorHelper::Get() {
+   return g_frame_color_helper.get();
+ }
+ 
++bool FrameColorHelper::HasCustomImage(
++    int id,
++    const ui::ColorProviderKey& key) const {
++  return BrowserThemePack::IsPersistentImageID(id) && key.custom_theme &&
++         key.custom_theme->HasCustomImage(id);
++}
++
++bool FrameColorHelper::DwmColorsAllowed(
++    const ui::ColorProviderKey& key) const {
++  return !ShouldAlwaysUseSystemTitlebar() ||
++         !HasCustomImage(IDR_THEME_FRAME, key);
++}
++
+ color_utils::HSL FrameColorHelper::GetTint(
+     int id,
+     const ui::ColorProviderKey& key) const {
+diff --git a/chrome/browser/ui/views/frame/browser_frame_view_win.cc b/chrome/browser/ui/views/frame/browser_frame_view_win.cc
+index 7fcbd9db7265c..dbc20cddf8adf 100644
+--- a/chrome/browser/ui/views/frame/browser_frame_view_win.cc
++++ b/chrome/browser/ui/views/frame/browser_frame_view_win.cc
+@@ -417,7 +417,7 @@ void BrowserFrameViewWin::ResetWindowControls() {
+ void BrowserFrameViewWin::OnThemeChanged() {
+   BrowserNonClientFrameView::OnThemeChanged();
+   if (!ShouldBrowserCustomDrawTitlebar(browser_view())) {
+-    SetSystemMicaTitlebarAttributes();
++    SetSystemTitlebarAttributes();
+   }
+ }
+ 
+@@ -663,25 +663,27 @@ bool BrowserFrameViewWin::ShouldShowWindowTitle(TitlebarType type) const {
+ 
+ void BrowserFrameViewWin::TabletModeChanged() {
+   if (!ShouldBrowserCustomDrawTitlebar(browser_view())) {
+-    SetSystemMicaTitlebarAttributes();
++    SetSystemTitlebarAttributes();
+   }
+ }
+ 
+-void BrowserFrameViewWin::SetSystemMicaTitlebarAttributes() {
+-  CHECK(SystemTitlebarCanUseMicaMaterial());
+-
+-  const BOOL dark_titlebar_enabled =
+-      frame()->GetColorMode() == ui::ColorProviderKey::ColorMode::kDark;
+-  DwmSetWindowAttribute(views::HWNDForWidget(frame()),
+-                        DWMWA_USE_IMMERSIVE_DARK_MODE, &dark_titlebar_enabled,
+-                        sizeof(dark_titlebar_enabled));
++void BrowserFrameViewWin::SetSystemTitlebarAttributes() {
++  if (SystemTitlebarSupportsDarkMode()) {
++  const BOOL dark_titlebar_enabled =
++      frame()->GetColorMode() == ui::ColorProviderKey::ColorMode::kDark;
++    DwmSetWindowAttribute(views::HWNDForWidget(frame()),
++                          DWMWA_USE_IMMERSIVE_DARK_MODE, &dark_titlebar_enabled,
++                          sizeof(dark_titlebar_enabled));
++  }
+ 
+-  const DWM_SYSTEMBACKDROP_TYPE dwm_backdrop_type =
+-      browser_view()->GetTabStripVisible() ? DWMSBT_TABBEDWINDOW
+-                                           : DWMSBT_MAINWINDOW;
+-  DwmSetWindowAttribute(views::HWNDForWidget(frame()),
+-                        DWMWA_SYSTEMBACKDROP_TYPE, &dwm_backdrop_type,
+-                        sizeof(dwm_backdrop_type));
++  if (ShouldBrowserUseMicaTitlebar(browser_view())) {
++    const DWM_SYSTEMBACKDROP_TYPE dwm_backdrop_type =
++        browser_view()->GetTabStripVisible() ? DWMSBT_TABBEDWINDOW
++                                             : DWMSBT_MAINWINDOW;
++    DwmSetWindowAttribute(views::HWNDForWidget(frame()),
++                          DWMWA_SYSTEMBACKDROP_TYPE, &dwm_backdrop_type,
++                          sizeof(dwm_backdrop_type));
++  }
+ }
+ 
+ SkColor BrowserFrameViewWin::GetTitlebarColor() const {
+diff --git a/chrome/browser/ui/views/frame/browser_frame_view_win.h b/chrome/browser/ui/views/frame/browser_frame_view_win.h
+index d3210e6c02922..fc9ab25369d8a 100644
+--- a/chrome/browser/ui/views/frame/browser_frame_view_win.h
++++ b/chrome/browser/ui/views/frame/browser_frame_view_win.h
+@@ -146,8 +146,8 @@ class BrowserFrameViewWin : public BrowserNonClientFrameView,
+   // Called when the device enters or exits tablet mode.
+   void TabletModeChanged();
+ 
+-  // Sets DWM attributes for rendering the system-drawn Mica titlebar.
+-  void SetSystemMicaTitlebarAttributes();
++  // Sets DWM attributes for rendering the system-drawn titlebar.
++  void SetSystemTitlebarAttributes();
+ 
+   // Paint various sub-components of this view.
+   void PaintTitlebar(gfx::Canvas* canvas) const;
+diff --git a/chrome/browser/win/titlebar_config.cc b/chrome/browser/win/titlebar_config.cc
+index 7898ea88ca529..c0ca70a3025b0 100644
+--- a/chrome/browser/win/titlebar_config.cc
++++ b/chrome/browser/win/titlebar_config.cc
+@@ -4,17 +4,39 @@
+
+ #include "chrome/browser/win/titlebar_config.h"
+
++#include "base/command_line.h"
++#include "base/win/windows_version.h"
+ #include "chrome/browser/themes/theme_service.h"
+ #include "chrome/browser/themes/theme_service_factory.h"
+ #include "chrome/browser/ui/browser.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
++#include "chrome/common/chrome_switches.h"
+ #include "chrome/browser/win/mica_titlebar.h"
+
+ bool ShouldBrowserCustomDrawTitlebar(BrowserView* browser_view) {
+-  return !ShouldDefaultThemeUseMicaTitlebar() ||
+-         !ThemeServiceFactory::GetForProfile(browser_view->GetProfile())
+-              ->UsingSystemTheme() ||
+-         (!browser_view->browser()->is_type_normal() &&
+-          !browser_view->browser()->is_type_popup() &&
+-          !browser_view->browser()->is_type_devtools());
++  return !ShouldAlwaysUseSystemTitlebar() &&
++         !ShouldBrowserUseMicaTitlebar(browser_view);
++}
++
++bool ShouldAlwaysUseSystemTitlebar() {
++  // Cache flag lookup.
++  static const bool custom_titlebar_disabled =
++      base::CommandLine::InitializedForCurrentProcess() &&
++      base::CommandLine::ForCurrentProcess()->HasSwitch(
++          switches::kDisableWindows10CustomTitlebar);
++
++  return custom_titlebar_disabled;
++}
++
++bool ShouldBrowserUseMicaTitlebar(BrowserView* browser_view) {
++  return ShouldDefaultThemeUseMicaTitlebar() &&
++         (browser_view->browser()->is_type_normal() ||
++          browser_view->browser()->is_type_popup() ||
++          browser_view->browser()->is_type_devtools()) &&
++         ThemeServiceFactory::GetForProfile(browser_view->GetProfile())
++             ->UsingSystemTheme();
++}
++
++bool SystemTitlebarSupportsDarkMode() {
++  return base::win::GetVersion() >= base::win::Version::WIN11;
+ }
+diff --git a/chrome/browser/win/titlebar_config.h b/chrome/browser/win/titlebar_config.h
+index f0d13d10bd284..84f601a3ce932 100644
+--- a/chrome/browser/win/titlebar_config.h
++++ b/chrome/browser/win/titlebar_config.h
+@@ -10,4 +10,15 @@ class BrowserView;
+ // Returns whether we should custom draw the titlebar for a browser window.
+ bool ShouldBrowserCustomDrawTitlebar(BrowserView* browser_view);
+
++// Returns whether we should always use the system titlebar, even when a theme
++// is applied.
++bool ShouldAlwaysUseSystemTitlebar();
++
++// Returns whether we should use the Mica titlebar material for a browser
++// window.
++bool ShouldBrowserUseMicaTitlebar(BrowserView* browser_view);
++
++// Returns whether the system-drawn titlebar can be drawn in dark mode.
++bool SystemTitlebarSupportsDarkMode();
++
+ #endif  // CHROME_BROWSER_WIN_TITLEBAR_CONFIG_H_
+diff --git a/chrome/common/chrome_switches.cc b/chrome/common/chrome_switches.cc
+index 372e1c9968552..95a20b47184ea 100644
+--- a/chrome/common/chrome_switches.cc
++++ b/chrome/common/chrome_switches.cc
+@@ -796,6 +796,10 @@ const char kMakeChromeDefault[] = "make-chrome-default";
+ #endif  // BUILDFLAG(IS_MAC)
+ 
+ #if BUILDFLAG(IS_WIN)
++// Disables custom-drawing the window titlebar on Windows 10.
++const char kDisableWindows10CustomTitlebar[] =
++    "disable-windows10-custom-titlebar";
++
+ // Force-enables the profile shortcut manager. This is needed for tests since
+ // they use a custom-user-data-dir which disables this.
+ const char kEnableProfileShortcutManager[] = "enable-profile-shortcut-manager";
+diff --git a/chrome/common/chrome_switches.h b/chrome/common/chrome_switches.h
+index 557801809a6d7..5f19c2f7b9dda 100644
+--- a/chrome/common/chrome_switches.h
++++ b/chrome/common/chrome_switches.h
+@@ -250,6 +250,7 @@ extern const char kMakeChromeDefault[];
+ #endif  // BUILDFLAG(IS_MAC)
+ 
+ #if BUILDFLAG(IS_WIN)
++extern const char kDisableWindows10CustomTitlebar[];
+ extern const char kEnableProfileShortcutManager[];
+ extern const char kFromBrowserSwitcher[];
+ extern const char kFromInstaller[];
