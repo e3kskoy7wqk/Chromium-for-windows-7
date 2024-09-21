@@ -1,0 +1,63 @@
+diff --git a/content/browser/font_unique_name_lookup/font_unique_name_lookup_android.cc b/content/browser/font_unique_name_lookup/font_unique_name_lookup_android.cc
+index ccd7a14756d8f..6def1caf1c485 100644
+--- a/content/browser/font_unique_name_lookup/font_unique_name_lookup_android.cc
++++ b/content/browser/font_unique_name_lookup/font_unique_name_lookup_android.cc
+@@ -4,9 +4,6 @@
+ 
+ #include "content/browser/font_unique_name_lookup/font_unique_name_lookup_android.h"
+ 
+-#include <set>
+-#include <vector>
+-
+ #include "base/android/build_info.h"
+ #include "base/check.h"
+ #include "base/containers/span_rust.h"
+@@ -23,16 +20,13 @@
+ #include "third_party/blink/public/common/font_unique_name_lookup/font_table_persistence.h"
+ #include "third_party/blink/public/common/font_unique_name_lookup/font_unique_name_table.pb.h"
+ #include "third_party/blink/public/common/font_unique_name_lookup/icu_fold_case_util.h"
++
++#include <set>
++#include <vector>
+ #include "third_party/icu/source/common/unicode/unistr.h"
+ #include "third_party/rust/cxx/v1/cxx.h"
+ 
+-// clang-format off
+-#include <ft2build.h>
+-#include FT_SYSTEM_H
+-#include FT_TRUETYPE_TABLES_H
+-#include FT_SFNT_NAMES_H
+ #include FT_TRUETYPE_IDS_H
+-// clang-format on
+ 
+ static_assert(BUILDFLAG(IS_ANDROID), "This implementation only works safely "
+               "on Android due to the way it assumes font files to be "
+diff --git a/content/browser/font_unique_name_lookup/font_unique_name_lookup_android.h b/content/browser/font_unique_name_lookup/font_unique_name_lookup_android.h
+index 65bbce792adfc..cc808c5ff6ba5 100644
+--- a/content/browser/font_unique_name_lookup/font_unique_name_lookup_android.h
++++ b/content/browser/font_unique_name_lookup/font_unique_name_lookup_android.h
+@@ -12,6 +12,11 @@
+ #include "content/common/content_export.h"
+ #include "third_party/blink/public/mojom/font_unique_name_lookup/font_unique_name_lookup.mojom.h"
+ 
++#include <ft2build.h>
++#include FT_SYSTEM_H
++#include FT_TRUETYPE_TABLES_H
++#include FT_SFNT_NAMES_H
++
+ #include <string>
+ 
+ static_assert(BUILDFLAG(IS_ANDROID), "This implementation only works safely "
+diff --git a/third_party/blink/renderer/platform/fonts/win/font_cache_skia_win.cc b/third_party/blink/renderer/platform/fonts/win/font_cache_skia_win.cc
+index 2489ad14d51b7..7dd1f851ad8ab 100644
+--- a/third_party/blink/renderer/platform/fonts/win/font_cache_skia_win.cc
++++ b/third_party/blink/renderer/platform/fonts/win/font_cache_skia_win.cc
+@@ -31,6 +31,8 @@
+ 
+ #include <windows.h>  // For GetACP()
+ 
++#include <freetype/freetype.h>
++#include <ft2build.h>
+ #include <unicode/uscript.h>
+ 
+ #include <memory>
