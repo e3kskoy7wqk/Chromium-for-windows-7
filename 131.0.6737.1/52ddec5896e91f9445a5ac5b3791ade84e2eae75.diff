@@ -1,0 +1,183 @@
+
+
+diff --git a/chrome/credential_provider/gaiacp/scoped_user_profile.cc b/chrome/credential_provider/gaiacp/scoped_user_profile.cc
+index 94c032049bdc0..9da8e7546d31c 100644
+--- a/chrome/credential_provider/gaiacp/scoped_user_profile.cc
++++ b/chrome/credential_provider/gaiacp/scoped_user_profile.cc
+@@ -29,6 +27,7 @@
+ #include "base/strings/utf_string_conversions.h"
+ #include "base/win/registry.h"
+ #include "base/win/shlwapi.h"
++#include "base/win/windows_version.h"
+ #include "chrome/credential_provider/common/gcp_strings.h"
+ #include "chrome/credential_provider/gaiacp/gcp_utils.h"
+ #include "chrome/credential_provider/gaiacp/gcpw_strings.h"
+@@ -261,11 +260,13 @@ HRESULT CreateDirectoryWithRestrictedAccess(const base::FilePath& path) {
+   return hr;
+ }
+ 
+-HRESULT UpdateProfilePictures(const std::wstring& sid,
+-                              const std::wstring& picture_url,
+-                              bool force_update) {
++HRESULT UpdateProfilePicturesForWindows8AndNewer(
++    const std::wstring& sid,
++    const std::wstring& picture_url,
++    bool force_update) {
+   DCHECK(!sid.empty());
+   DCHECK(!picture_url.empty());
++  DCHECK(base::win::GetVersion() >= base::win::Version::WIN8);
+ 
+   // Try to download profile pictures of all required sizes for windows.
+   // Needed profile picture sizes are in |kProfilePictureSizes|.
+@@ -593,20 +594,24 @@ HRESULT ScopedUserProfile::SaveAccountInfo(
+     }
+   }
+ 
+-  std::wstring picture_url = GetDictString(properties, kKeyPicture);
+-  if (!picture_url.empty() && !sid.empty()) {
+-    wchar_t old_picture_url[512];
+-    ULONG url_size = std::size(old_picture_url);
+-    hr = GetUserProperty(sid, kUserPictureUrl, old_picture_url, &url_size);
+-
+-    UpdateProfilePictures(sid, picture_url,
+-                          FAILED(hr) || old_picture_url != picture_url);
+-    hr = SetUserProperty(sid.c_str(), kUserPictureUrl, picture_url.c_str());
+-    if (FAILED(hr)) {
+-      LOGFN(ERROR) << "SetUserProperty(pic) hr=" << putHR(hr);
+-      return hr;
++  // This code for setting profile pictures is specific for windows 8+.
++  if (base::win::GetVersion() >= base::win::Version::WIN8) {
++    std::wstring picture_url = GetDictString(properties, kKeyPicture);
++    if (!picture_url.empty() && !sid.empty()) {
++      wchar_t old_picture_url[512];
++      ULONG url_size = std::size(old_picture_url);
++      hr = GetUserProperty(sid, kUserPictureUrl, old_picture_url, &url_size);
++
++      UpdateProfilePicturesForWindows8AndNewer(
++          sid, picture_url, FAILED(hr) || old_picture_url != picture_url);
++      hr = SetUserProperty(sid.c_str(), kUserPictureUrl, picture_url.c_str());
++      if (FAILED(hr)) {
++        LOGFN(ERROR) << "SetUserProperty(pic) hr=" << putHR(hr);
++        return hr;
++      }
+     }
+   }
++
+   return S_OK;
+ }
+ 
+diff --git a/chrome/credential_provider/test/gcp_gls_output_unittest.cc b/chrome/credential_provider/test/gcp_gls_output_unittest.cc
+index 2699f1b1634e1..fcf4402fa60d2 100644
+--- a/chrome/credential_provider/test/gcp_gls_output_unittest.cc
++++ b/chrome/credential_provider/test/gcp_gls_output_unittest.cc
+@@ -72,6 +72,16 @@ class GcpUsingChromeTest : public ::testing::Test {
+   std::string RunProcessAndExtractOutput(
+       const base::CommandLine& command_line) const;
+ 
++  bool ShouldRunTestOnThisOS() const {
++    // TODO(crbug.com/909722) Enable tests again once they are all passing. Currently, all tests are
++    // flaky on all bots except win-asan.
++    return false;
++    // TODO(crbug.com/906793). For some reason handle inheritance does not work
++    // correctly on Windows7 and causes all the tests to stall indefinetely.
++    // Since GCPW is only targeted for Windows 10 currently, disable these
++    // unit tests for now until the problem can be resolved.
++    // return base::win::GetVersion() >= base::win::Version::WIN10;
++  }
+   std::unique_ptr<net::test_server::HttpResponse> GaiaHtmlResponseHandler(
+       const net::test_server::HttpRequest& request);
+   std::unique_ptr<net::test_server::HttpResponse> GoogleApisHtmlResponseHandler(
+@@ -92,6 +102,9 @@ GcpUsingChromeTest::GcpUsingChromeTest()
+     : proxy_server_(net::SpawnedTestServer::TYPE_PROXY, base::FilePath()) {}
+ 
+ void GcpUsingChromeTest::SetUp() {
++  if (!ShouldRunTestOnThisOS())
++    return;
++
+   // Redirect connections to signin related pages to a handler that will
+   // generate the needed headers and content to move the signin flow
+   // forward automatically.
+@@ -111,6 +124,9 @@ void GcpUsingChromeTest::SetUp() {
+ }
+ 
+ void GcpUsingChromeTest::TearDown() {
++  if (!ShouldRunTestOnThisOS())
++    return;
++
+   EXPECT_TRUE(gaia_server_.ShutdownAndWaitUntilComplete());
+   EXPECT_TRUE(google_apis_server_.ShutdownAndWaitUntilComplete());
+   EXPECT_TRUE(proxy_server_.Stop());
+@@ -328,9 +344,10 @@ GcpUsingChromeTest::GoogleApisHtmlResponseHandler(
+   return std::move(http_response);
+ }
+ 
+-// TODO(crbug.com/41428735): Enable tests again once they are all passing.
+-// Currently, all tests are flaky on all bots except win-asan.
+-TEST_F(GcpUsingChromeTest, DISABLED_VerifyMissingSigninInfoOutput) {
++TEST_F(GcpUsingChromeTest, VerifyMissingSigninInfoOutput) {
++  if (!ShouldRunTestOnThisOS())
++    return;
++
+   SetPasswordForSignin(std::string());
+   SetTokenInfoResponse(
+       {net::HTTP_OK, test_data_storage_.GetSuccessfulTokenInfoFetchResult()});
+@@ -350,7 +367,10 @@ TEST_F(GcpUsingChromeTest, DISABLED_VerifyMissingSigninInfoOutput) {
+   EXPECT_FALSE(mdm_token_response_.response_given_);
+ }
+ 
+-TEST_F(GcpUsingChromeTest, DISABLED_VerifySigninFailureOutput) {
++TEST_F(GcpUsingChromeTest, VerifySigninFailureOutput) {
++  if (!ShouldRunTestOnThisOS())
++    return;
++
+   SetTokenInfoResponse(
+       {net::HTTP_OK, test_data_storage_.GetSuccessfulTokenInfoFetchResult()});
+   SetUserInfoResponse(
+@@ -370,7 +390,10 @@ TEST_F(GcpUsingChromeTest, DISABLED_VerifySigninFailureOutput) {
+   EXPECT_FALSE(mdm_token_response_.response_given_);
+ }
+ 
+-TEST_F(GcpUsingChromeTest, DISABLED_VerifyTokenInfoFailureOutput) {
++TEST_F(GcpUsingChromeTest, VerifyTokenInfoFailureOutput) {
++  if (!ShouldRunTestOnThisOS())
++    return;
++
+   SetTokenInfoResponse({net::HTTP_OK,
+                         CredentialProviderSigninDialogTestDataStorage::
+                             kInvalidTokenInfoResponse});
+@@ -388,7 +411,10 @@ TEST_F(GcpUsingChromeTest, DISABLED_VerifyTokenInfoFailureOutput) {
+   EXPECT_TRUE(token_info_response_.response_given_);
+ }
+ 
+-TEST_F(GcpUsingChromeTest, DISABLED_VerifyUserInfoFailureOutput) {
++TEST_F(GcpUsingChromeTest, VerifyUserInfoFailureOutput) {
++  if (!ShouldRunTestOnThisOS())
++    return;
++
+   SetTokenInfoResponse(
+       {net::HTTP_OK, test_data_storage_.GetSuccessfulTokenInfoFetchResult()});
+   SetUserInfoResponse({net::HTTP_OK,
+@@ -407,7 +433,10 @@ TEST_F(GcpUsingChromeTest, DISABLED_VerifyUserInfoFailureOutput) {
+   EXPECT_TRUE(mdm_token_response_.response_given_);
+ }
+ 
+-TEST_F(GcpUsingChromeTest, DISABLED_VerifyMdmFailureOutput) {
++TEST_F(GcpUsingChromeTest, VerifyMdmFailureOutput) {
++  if (!ShouldRunTestOnThisOS())
++    return;
++
+   SetTokenInfoResponse(
+       {net::HTTP_OK, test_data_storage_.GetSuccessfulTokenInfoFetchResult()});
+   SetUserInfoResponse(
+@@ -425,7 +454,10 @@ TEST_F(GcpUsingChromeTest, DISABLED_VerifyMdmFailureOutput) {
+   EXPECT_FALSE(user_info_response_.response_given_);
+ }
+ 
+-TEST_F(GcpUsingChromeTest, DISABLED_VerifySuccessOutput) {
++TEST_F(GcpUsingChromeTest, VerifySuccessOutput) {
++  if (!ShouldRunTestOnThisOS())
++    return;
++
+   SetTokenInfoResponse(
+       {net::HTTP_OK, test_data_storage_.GetSuccessfulTokenInfoFetchResult()});
+   SetUserInfoResponse(
