@@ -1,0 +1,1 @@
+Bug 1837667 - avoid calling GetDpiForMonitor on Windows < 8.1;r=mjf,webrtc-reviewers,pehrsons    2023/6/21 0:31:18    c66138eac915b588b62c17fefe3da57a90131be8
