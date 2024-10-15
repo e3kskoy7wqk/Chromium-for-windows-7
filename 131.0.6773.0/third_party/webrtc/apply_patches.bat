@@ -2,7 +2,7 @@
 setlocal EnableDelayedExpansion
 
 REM Set the path to the repository
-set "REPO_PATH=C:\win7dep\chromium\src\third_party\webrtc"
+set "REPO_PATH=E:\win7dep\chromium\src\third_party\webrtc"
 
 REM Temporary file for storing commit hashes
 set "temp_file=temp.txt"

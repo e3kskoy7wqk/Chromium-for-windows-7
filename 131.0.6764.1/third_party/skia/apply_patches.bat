@@ -2,7 +2,7 @@
 setlocal EnableDelayedExpansion
 
 REM Set the path to the repository
-set "REPO_PATH=C:\win7dep\chromium\src\third_party\skia"
+set "REPO_PATH=E:\win7dep\chromium\src\third_party\skia"
 
 REM Temporary file for storing commit hashes
 set "temp_file=temp.txt"
