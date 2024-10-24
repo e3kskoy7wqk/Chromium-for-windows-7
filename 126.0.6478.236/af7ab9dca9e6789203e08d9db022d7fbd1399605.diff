@@ -33,7 +33,7 @@ index ba51820bfcd4c..127784532b53a 100644
  #include "base/task/thread_pool.h"
  #include "build/build_config.h"
  #include "third_party/skia/include/core/SkBitmap.h"
-@@ -77,3 +78,40 @@ void ElevationIconSetter::SetButtonIcon(const SkBitmap& icon) {
+@@ -77,3 +78,36 @@ void ElevationIconSetter::SetButtonIcon(const SkBitmap& icon) {
              gfx::ImageSkia::CreateFromBitmap(icon, device_scale_factor)));
    }
  }
@@ -68,10 +68,6 @@ index ba51820bfcd4c..127784532b53a 100644
 +        ui::ImageModel::FromImageSkia(
 +            gfx::ImageSkia::CreateFromBitmap(icon, device_scale_factor)));
 +    button_->SizeToPreferredSize();
-+    if (button_->parent())
-+      button_->parent()->DeprecatedLayoutImmediately();
-+    if (!callback.is_null())
-+      std::move(callback).Run(base::PassKey<views::View>{});
 +  }
 +}
 diff --git a/chrome/browser/ui/views/elevation_icon_setter.h b/chrome/browser/ui/views/elevation_icon_setter.h

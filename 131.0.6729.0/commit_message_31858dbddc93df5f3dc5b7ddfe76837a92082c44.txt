@@ -1,1 +1,0 @@
-Bugfix: kPreloadSystemFonts' subpixel rendering bug    2024-08-09 09:46:56    31858dbddc93df5f3dc5b7ddfe76837a92082c44

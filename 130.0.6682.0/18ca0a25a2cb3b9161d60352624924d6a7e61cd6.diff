@@ -738,3 +738,20 @@ index d46f2141d642a..90c0233c4fc34 100644
    HRESULT hr = base::win::GetActivationFactory<
        IGeolocatorStatics, RuntimeClass_Windows_Devices_Geolocation_Geolocator>(
        &geolocator_statics);
+diff --git a/device/fido/win/util.cc b/device/fido/win/util.cc
+index b1b039e9aa656..0437fa3ce5824 100644
+--- a/device/fido/win/util.cc
++++ b/device/fido/win/util.cc
+@@ -51,6 +51,12 @@ void DeviceHasBiometricsAvailableInternal(
+   }
+
+   ComPtr<IUserConsentVerifierStatics> factory;
++  // Provide access to Core WinRT/UWP functions.
++  if (!base::win::ResolveCoreWinRTDelayload()) {
++    // Failed loading functions from combase.dll.
++    std::move(callback).Run(false);
++    return;
++  }
+   HRESULT hr = base::win::GetActivationFactory<
+       IUserConsentVerifierStatics,
+       RuntimeClass_Windows_Security_Credentials_UI_UserConsentVerifier>(

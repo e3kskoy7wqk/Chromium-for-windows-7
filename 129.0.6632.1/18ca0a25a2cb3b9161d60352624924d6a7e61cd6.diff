@@ -678,3 +678,20 @@ index 7eb92391a6c66..ef56fe683c81f 100644
    base::win::ScopedHString closed_caption_properties_string =
        base::win::ScopedHString::Create(
            RuntimeClass_Windows_Media_ClosedCaptioning_ClosedCaptionProperties);
+diff --git a/device/fido/win/util.cc b/device/fido/win/util.cc
+index b1b039e9aa656..0437fa3ce5824 100644
+--- a/device/fido/win/util.cc
++++ b/device/fido/win/util.cc
+@@ -51,6 +51,12 @@ void DeviceHasBiometricsAvailableInternal(
+   }
+
+   ComPtr<IUserConsentVerifierStatics> factory;
++  // Provide access to Core WinRT/UWP functions.
++  if (!base::win::ResolveCoreWinRTDelayload()) {
++    // Failed loading functions from combase.dll.
++    std::move(callback).Run(false);
++    return;
++  }
+   HRESULT hr = base::win::GetActivationFactory<
+       IUserConsentVerifierStatics,
+       RuntimeClass_Windows_Security_Credentials_UI_UserConsentVerifier>(
