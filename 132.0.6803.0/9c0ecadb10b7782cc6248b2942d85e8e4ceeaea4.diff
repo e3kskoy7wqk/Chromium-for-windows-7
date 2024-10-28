@@ -1,0 +1,95 @@
+diff --git a/chrome/browser/about_flags.cc b/chrome/browser/about_flags.cc
+index 502cadc0e3e3d..4538ce95c7703 100644
+--- a/chrome/browser/about_flags.cc
++++ b/chrome/browser/about_flags.cc
+@@ -7202,6 +7202,11 @@ const FeatureEntry kFeatureEntries[] = {
+ #endif  // BUILDFLAG(ENABLE_PRINTING)
+ 
+ #if BUILDFLAG(IS_WIN)
++    {"enable-windows-gaming-input-data-fetcher",
++     flag_descriptions::kEnableWindowsGamingInputDataFetcherName,
++     flag_descriptions::kEnableWindowsGamingInputDataFetcherDescription, kOsWin,
++     FEATURE_VALUE_TYPE(features::kEnableWindowsGamingInputDataFetcher)},
++
+     {"windows11-mica-titlebar", flag_descriptions::kWindows11MicaTitlebarName,
+      flag_descriptions::kWindows11MicaTitlebarDescription, kOsWin,
+      FEATURE_VALUE_TYPE(kWindows11MicaTitlebar)},
+diff --git a/chrome/browser/flag_descriptions.cc b/chrome/browser/flag_descriptions.cc
+index 029a3e20a4fcf..ca37f1ee967d8 100644
+--- a/chrome/browser/flag_descriptions.cc
++++ b/chrome/browser/flag_descriptions.cc
+@@ -1578,6 +1578,12 @@ const char kEnablePerfettoSystemTracingDescription[] =
+     "When enabled, Chrome will attempt to connect to the system tracing "
+     "service";
+ 
++const char kEnableWindowsGamingInputDataFetcherName[] =
++    "Enable Windows.Gaming.Input";
++const char kEnableWindowsGamingInputDataFetcherDescription[] =
++    "Enable Windows.Gaming.Input by default to provide game controller "
++    "support on Windows 10 desktop.";
++
+ const char kBlockInsecurePrivateNetworkRequestsName[] =
+     "Block insecure private network requests.";
+ const char kBlockInsecurePrivateNetworkRequestsDescription[] =
+diff --git a/chrome/browser/flag_descriptions.h b/chrome/browser/flag_descriptions.h
+index 32cf525806384..4d72ac619be16 100644
+--- a/chrome/browser/flag_descriptions.h
++++ b/chrome/browser/flag_descriptions.h
+@@ -823,6 +823,9 @@ extern const char kEnableGpuServiceLoggingDescription[];
+ extern const char kEnableNetworkLoggingToFileName[];
+ extern const char kEnableNetworkLoggingToFileDescription[];
+ 
++extern const char kEnableWindowsGamingInputDataFetcherName[];
++extern const char kEnableWindowsGamingInputDataFetcherDescription[];
++
+ extern const char kBlockInsecurePrivateNetworkRequestsName[];
+ extern const char kBlockInsecurePrivateNetworkRequestsDescription[];
+ 
+diff --git a/device/gamepad/gamepad_platform_data_fetcher.h b/device/gamepad/gamepad_platform_data_fetcher.h
+index 2e32c0f54b23c..e1039f557b773 100644
+--- a/device/gamepad/gamepad_platform_data_fetcher.h
++++ b/device/gamepad/gamepad_platform_data_fetcher.h
+@@ -43,7 +43,13 @@ void AddGamepadPlatformDataFetchers(GamepadDataFetcherManager* manager) {
+ 
+ #elif BUILDFLAG(IS_WIN)
+ 
+-  manager->AddFactory(new WgiDataFetcherWin::Factory());
++  // Windows.Gaming.Input is available in Windows 10.0.10240.0 and later.
++  if (base::FeatureList::IsEnabled(
++          features::kEnableWindowsGamingInputDataFetcher)) {
++    manager->AddFactory(new WgiDataFetcherWin::Factory());
++  } else {
++    manager->AddFactory(new XInputDataFetcherWin::Factory());
++  }
+   manager->AddFactory(new NintendoDataFetcher::Factory());
+   manager->AddFactory(new RawInputDataFetcher::Factory());
+ 
+diff --git a/device/gamepad/public/cpp/gamepad_features.cc b/device/gamepad/public/cpp/gamepad_features.cc
+index dc1cd98f9225b..a7363ff068c5a 100644
+--- a/device/gamepad/public/cpp/gamepad_features.cc
++++ b/device/gamepad/public/cpp/gamepad_features.cc
+@@ -20,6 +20,11 @@ BASE_FEATURE(kEnableGamepadButtonAxisEvents,
+              "EnableGamepadButtonAxisEvents",
+              base::FEATURE_DISABLED_BY_DEFAULT);
+ 
++// Enables the Windows.Gaming.Input data fetcher.
++BASE_FEATURE(kEnableWindowsGamingInputDataFetcher,
++             "EnableWindowsGamingInputDataFetcher",
++             base::FEATURE_ENABLED_BY_DEFAULT);
++
+ BASE_FEATURE(kRestrictGamepadAccess,
+              "RestrictGamepadAccess",
+              base::FEATURE_DISABLED_BY_DEFAULT);
+diff --git a/device/gamepad/public/cpp/gamepad_features.h b/device/gamepad/public/cpp/gamepad_features.h
+index 4d6b2b84b9d09..77a850303dfba 100644
+--- a/device/gamepad/public/cpp/gamepad_features.h
++++ b/device/gamepad/public/cpp/gamepad_features.h
+@@ -11,6 +11,8 @@
+ namespace features {
+ 
+ GAMEPAD_FEATURES_EXPORT BASE_DECLARE_FEATURE(kEnableGamepadButtonAxisEvents);
++GAMEPAD_FEATURES_EXPORT BASE_DECLARE_FEATURE(
++    kEnableWindowsGamingInputDataFetcher);
+ GAMEPAD_FEATURES_EXPORT BASE_DECLARE_FEATURE(kRestrictGamepadAccess);
+ GAMEPAD_FEATURES_EXPORT BASE_DECLARE_FEATURE(kEnableGamepadMultitouch);
+ 
