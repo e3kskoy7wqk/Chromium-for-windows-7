@@ -1,0 +1,874 @@
+diff --git a/chrome/common/ppapi_utils.cc b/chrome/common/ppapi_utils.cc
+index 9bebcc05fbebe..862778c33ed00 100644
+--- a/chrome/common/ppapi_utils.cc
++++ b/chrome/common/ppapi_utils.cc
+@@ -76,6 +76,7 @@
+ #include "ppapi/c/private/ppb_flash_font_file.h"
+ #include "ppapi/c/private/ppb_host_resolver_private.h"
+ #include "ppapi/c/private/ppb_isolated_file_system_private.h"
++#include "ppapi/c/private/ppb_pdf.h"
+ #include "ppapi/c/private/ppb_proxy_private.h"
+ #include "ppapi/c/private/ppb_tcp_server_socket_private.h"
+ #include "ppapi/c/private/ppb_tcp_socket_private.h"
+@@ -98,6 +99,7 @@ bool IsSupportedPepperInterface(const char* name) {
+ #include "ppapi/thunk/interfaces_ppb_private.h"
+ #include "ppapi/thunk/interfaces_ppb_private_flash.h"
+ #include "ppapi/thunk/interfaces_ppb_private_no_permissions.h"
++#include "ppapi/thunk/interfaces_ppb_private_pdf.h"
+ #include "ppapi/thunk/interfaces_ppb_public_dev.h"
+ #include "ppapi/thunk/interfaces_ppb_public_dev_channel.h"
+ #include "ppapi/thunk/interfaces_ppb_public_socket.h"
+diff --git a/content/renderer/accessibility/render_accessibility_impl_browsertest.cc b/content/renderer/accessibility/render_accessibility_impl_browsertest.cc
+index cb7cba63045cb..52d952875ebc8 100644
+--- a/content/renderer/accessibility/render_accessibility_impl_browsertest.cc
++++ b/content/renderer/accessibility/render_accessibility_impl_browsertest.cc
+@@ -32,6 +32,7 @@
+ #include "content/renderer/accessibility/ax_action_target_factory.h"
+ #include "content/renderer/accessibility/render_accessibility_impl_test.h"
+ #include "content/renderer/render_frame_impl.h"
++#include "ppapi/c/private/ppp_pdf.h"
+ #include "services/metrics/public/cpp/mojo_ukm_recorder.h"
+ #include "services/metrics/public/mojom/ukm_interface.mojom.h"
+ #include "third_party/blink/public/web/web_testing_support.h"
+diff --git a/content/renderer/pepper/pepper_plugin_instance_impl.cc b/content/renderer/pepper/pepper_plugin_instance_impl.cc
+index 3edff2b5f5d41..87bd9f2606e02 100644
+--- a/content/renderer/pepper/pepper_plugin_instance_impl.cc
++++ b/content/renderer/pepper/pepper_plugin_instance_impl.cc
+@@ -2086,6 +2086,7 @@ ppapi::Resource* PepperPluginInstanceImpl::GetSingletonResource(
+     case ppapi::FLASH_FULLSCREEN_SINGLETON_ID:
+     case ppapi::ISOLATED_FILESYSTEM_SINGLETON_ID:
+     case ppapi::NETWORK_PROXY_SINGLETON_ID:
++    case ppapi::PDF_SINGLETON_ID:
+       NOTIMPLEMENTED();
+       return nullptr;
+     case ppapi::GAMEPAD_SINGLETON_ID:
+diff --git a/content/renderer/pepper/plugin_module.cc b/content/renderer/pepper/plugin_module.cc
+index 9adf7c31d590c..3892b02f11c7a 100644
+--- a/content/renderer/pepper/plugin_module.cc
++++ b/content/renderer/pepper/plugin_module.cc
+@@ -108,6 +108,7 @@
+ #include "ppapi/c/private/ppb_host_resolver_private.h"
+ #include "ppapi/c/private/ppb_instance_private.h"
+ #include "ppapi/c/private/ppb_isolated_file_system_private.h"
++#include "ppapi/c/private/ppb_pdf.h"
+ #include "ppapi/c/private/ppb_proxy_private.h"
+ #include "ppapi/c/private/ppb_tcp_server_socket_private.h"
+ #include "ppapi/c/private/ppb_tcp_socket_private.h"
+@@ -295,6 +296,7 @@ const void* InternalGetInterface(const char* name) {
+ #include "ppapi/thunk/interfaces_ppb_private.h"
+ #include "ppapi/thunk/interfaces_ppb_private_flash.h"
+ #include "ppapi/thunk/interfaces_ppb_private_no_permissions.h"
++#include "ppapi/thunk/interfaces_ppb_private_pdf.h"
+ #include "ppapi/thunk/interfaces_ppb_public_dev.h"
+ #include "ppapi/thunk/interfaces_ppb_public_dev_channel.h"
+ #include "ppapi/thunk/interfaces_ppb_public_socket.h"
+diff --git a/ppapi/PRESUBMIT.py b/ppapi/PRESUBMIT.py
+index e65adcc776b73..5ac546f908920 100644
+--- a/ppapi/PRESUBMIT.py
++++ b/ppapi/PRESUBMIT.py
+@@ -225,9 +225,6 @@ def CheckChange(input_api, output_api):
+   whitelist = ['ppb_opengles2', 'ppb_opengles2ext_dev']
+ 
+   # The PDF interface is hand-written.
+-  # TODO(crbug.com/1302684): Remove the addition below when the APIs they allow
+-  # are gone. Removing these entries along with the PDF code in the same CL
+-  # confuses this presubmit script.
+   whitelist += ['ppb_pdf', 'ppp_pdf']
+ 
+   # Find all relevant .h and .idl files.
+diff --git a/ppapi/c/BUILD.gn b/ppapi/c/BUILD.gn
+index f211cd114077f..073f4671f949f 100644
+--- a/ppapi/c/BUILD.gn
++++ b/ppapi/c/BUILD.gn
+@@ -123,6 +123,7 @@ source_set("c") {
+     "private/ppb_instance_private.h",
+     "private/ppb_isolated_file_system_private.h",
+     "private/ppb_net_address_private.h",
++    "private/ppb_pdf.h",
+     "private/ppb_proxy_private.h",
+     "private/ppb_tcp_server_socket_private.h",
+     "private/ppb_tcp_socket_private.h",
+@@ -131,6 +132,7 @@ source_set("c") {
+     "private/ppb_uma_private.h",
+     "private/ppb_x509_certificate_private.h",
+     "private/ppp_instance_private.h",
++    "private/ppp_pdf.h",
+     "private/ppp_pexe_stream_handler.h",
+ 
+     # Deprecated interfaces.
+diff --git a/ppapi/c/private/OWNERS b/ppapi/c/private/OWNERS
+new file mode 100644
+index 0000000000000..e62fc9acaff51
+--- /dev/null
++++ b/ppapi/c/private/OWNERS
+@@ -0,0 +1,2 @@
++per-file ppb_pdf.h=thestig@chromium.org
++per-file ppp_pdf.h=thestig@chromium.org
+diff --git a/ppapi/c/private/ppb_pdf.h b/ppapi/c/private/ppb_pdf.h
+new file mode 100644
+index 0000000000000..ba173a706ee16
+--- /dev/null
++++ b/ppapi/c/private/ppb_pdf.h
+@@ -0,0 +1,17 @@
++// Copyright (c) 2011 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef PPAPI_C_PRIVATE_PPB_PDF_H_
++#define PPAPI_C_PRIVATE_PPB_PDF_H_
++
++#include "ppapi/c/pp_instance.h"
++
++#define PPB_PDF_INTERFACE "PPB_PDF;1"
++
++struct PPB_PDF {
++  // Invoke Print dialog for plugin.
++  void (*Print)(PP_Instance instance);
++};
++
++#endif  // PPAPI_C_PRIVATE_PPB_PDF_H_
+diff --git a/ppapi/c/private/ppp_pdf.h b/ppapi/c/private/ppp_pdf.h
+new file mode 100644
+index 0000000000000..b45531f93bdc7
+--- /dev/null
++++ b/ppapi/c/private/ppp_pdf.h
+@@ -0,0 +1,69 @@
++// Copyright 2014 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef PPAPI_C_PRIVATE_PPP_PDF_H_
++#define PPAPI_C_PRIVATE_PPP_PDF_H_
++
++#include <stdint.h>
++
++#include "ppapi/c/dev/pp_print_settings_dev.h"
++#include "ppapi/c/pp_instance.h"
++#include "ppapi/c/pp_point.h"
++#include "ppapi/c/pp_var.h"
++
++#define PPP_PDF_INTERFACE_1 "PPP_Pdf;1"
++#define PPP_PDF_INTERFACE PPP_PDF_INTERFACE_1
++
++typedef enum {
++  PP_PRIVATEDUPLEXMODE_NONE = 0,
++  PP_PRIVATEDUPLEXMODE_SIMPLEX = 1,
++  PP_PRIVATEDUPLEXMODE_SHORT_EDGE = 2,
++  PP_PRIVATEDUPLEXMODE_LONG_EDGE = 3,
++  PP_PRIVATEDUPLEXMODE_LAST = PP_PRIVATEDUPLEXMODE_LONG_EDGE
++} PP_PrivateDuplexMode_Dev;
++PP_COMPILE_ASSERT_SIZE_IN_BYTES(PP_PrivateDuplexMode_Dev, 4);
++
++struct PP_PdfPrintPresetOptions_Dev {
++  // Returns whether scaling is disabled. Returns same information as the
++  // PPP_Printing_Dev's method IsScalingDiabled().
++  PP_Bool is_scaling_disabled;
++
++  // Number of copies to be printed.
++  int32_t copies;
++
++  // DuplexMode to be used for printing.
++  PP_PrivateDuplexMode_Dev duplex;
++
++  // True if all the pages in the PDF are the same size.
++  PP_Bool is_page_size_uniform;
++
++  // Only valid if |is_page_size_uniform| is true. The page size.
++  PP_Size uniform_page_size;
++};
++PP_COMPILE_ASSERT_STRUCT_SIZE_IN_BYTES(PP_PdfPrintPresetOptions_Dev, 24);
++
++struct PP_PdfPrintSettings_Dev {
++  // Used for N-up mode.
++  uint32_t pages_per_sheet;
++
++  // The scale factor percentage, where 100 indicates default scaling.
++  uint32_t scale_factor;
++};
++PP_COMPILE_ASSERT_STRUCT_SIZE_IN_BYTES(PP_PdfPrintSettings_Dev, 8);
++
++struct PPP_Pdf_1_1 {
++  // This is a specialized version of PPP_Printing_Dev's Begin method.
++  // It functions in the same way, but takes an additional |pdf_print_settings|
++  // parameter. When the PPP_Pdf interface is available, use this instead of
++  // PPP_Printing_Dev's Begin method, in conjuction with PPP_Printing_Dev's
++  // other methods.
++  int32_t (*PrintBegin)(
++      PP_Instance instance,
++      const struct PP_PrintSettings_Dev* print_settings,
++      const struct PP_PdfPrintSettings_Dev* pdf_print_settings);
++};
++
++typedef PPP_Pdf_1_1 PPP_Pdf;
++
++#endif  // PPAPI_C_PRIVATE_PPP_PDF_H_
+diff --git a/ppapi/cpp/BUILD.gn b/ppapi/cpp/BUILD.gn
+index ef559d67c3ed1..975feff1d12cf 100644
+--- a/ppapi/cpp/BUILD.gn
++++ b/ppapi/cpp/BUILD.gn
+@@ -215,6 +215,8 @@ source_set("objects") {
+     "private/net_address_private.h",
+     "private/pass_file_handle.cc",
+     "private/pass_file_handle.h",
++    "private/pdf.cc",
++    "private/pdf.h",
+     "private/tcp_server_socket_private.cc",
+     "private/tcp_server_socket_private.h",
+     "private/tcp_socket_private.cc",
+diff --git a/ppapi/cpp/private/OWNERS b/ppapi/cpp/private/OWNERS
+new file mode 100644
+index 0000000000000..3f1a11b7e65d6
+--- /dev/null
++++ b/ppapi/cpp/private/OWNERS
+@@ -0,0 +1 @@
++per-file pdf.*=thestig@chromium.org
+diff --git a/ppapi/cpp/private/pdf.cc b/ppapi/cpp/private/pdf.cc
+new file mode 100644
+index 0000000000000..78d56dc466100
+--- /dev/null
++++ b/ppapi/cpp/private/pdf.cc
+@@ -0,0 +1,31 @@
++// Copyright (c) 2013 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "ppapi/cpp/private/pdf.h"
++
++#include "ppapi/cpp/instance_handle.h"
++#include "ppapi/cpp/module_impl.h"
++
++namespace pp {
++
++namespace {
++
++template <> const char* interface_name<PPB_PDF>() {
++  return PPB_PDF_INTERFACE;
++}
++
++}  // namespace
++
++// static
++bool PDF::IsAvailable() {
++  return has_interface<PPB_PDF>();
++}
++
++// static
++void PDF::Print(const InstanceHandle& instance) {
++  if (has_interface<PPB_PDF>())
++    get_interface<PPB_PDF>()->Print(instance.pp_instance());
++}
++
++}  // namespace pp
+diff --git a/ppapi/cpp/private/pdf.h b/ppapi/cpp/private/pdf.h
+new file mode 100644
+index 0000000000000..d2074791700d8
+--- /dev/null
++++ b/ppapi/cpp/private/pdf.h
+@@ -0,0 +1,26 @@
++// Copyright (c) 2013 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef PPAPI_CPP_PRIVATE_PDF_H_
++#define PPAPI_CPP_PRIVATE_PDF_H_
++
++#include <stdint.h>
++
++#include "ppapi/c/private/ppb_pdf.h"
++
++namespace pp {
++
++class InstanceHandle;
++
++class PDF {
++ public:
++  // Returns true if the required interface is available.
++  static bool IsAvailable();
++
++  static void Print(const InstanceHandle& instance);
++};
++
++}  // namespace pp
++
++#endif  // PPAPI_CPP_PRIVATE_PDF_H_
+diff --git a/ppapi/proxy/BUILD.gn b/ppapi/proxy/BUILD.gn
+index a8e6288567d06..8c6329caae7b0 100644
+--- a/ppapi/proxy/BUILD.gn
++++ b/ppapi/proxy/BUILD.gn
+@@ -110,6 +110,8 @@ component("proxy") {
+     "ppp_messaging_proxy.h",
+     "ppp_mouse_lock_proxy.cc",
+     "ppp_mouse_lock_proxy.h",
++    "ppp_pdf_proxy.cc",
++    "ppp_pdf_proxy.h",
+     "ppp_printing_proxy.cc",
+     "ppp_printing_proxy.h",
+     "ppp_text_input_proxy.cc",
+@@ -193,6 +195,8 @@ component("proxy") {
+       "host_dispatcher.h",
+       "host_var_serialization_rules.cc",
+       "host_var_serialization_rules.h",
++      "pdf_resource.cc",
++      "pdf_resource.h",
+       "ppb_buffer_proxy.cc",
+       "ppb_var_deprecated_proxy.cc",
+       "ppb_var_deprecated_proxy.h",
+diff --git a/ppapi/proxy/OWNERS b/ppapi/proxy/OWNERS
+index a7e6c89f7d064..c19effdcbd005 100644
+--- a/ppapi/proxy/OWNERS
++++ b/ppapi/proxy/OWNERS
+@@ -6,3 +6,6 @@ per-file *_messages.cc=file://ipc/SECURITY_OWNERS
+ 
+ per-file *_param_traits*.*=set noparent
+ per-file *_param_traits*.*=file://ipc/SECURITY_OWNERS
++
++per-file pdf_resource.*=thestig@chromium.org
++per-file ppp_pdf_proxy.*=thestig@chromium.org
+diff --git a/ppapi/proxy/interface_list.cc b/ppapi/proxy/interface_list.cc
+index 1a6d6a0c660c3..c401a1c6b94aa 100644
+--- a/ppapi/proxy/interface_list.cc
++++ b/ppapi/proxy/interface_list.cc
+@@ -80,6 +80,7 @@
+ #include "ppapi/c/private/ppb_host_resolver_private.h"
+ #include "ppapi/c/private/ppb_isolated_file_system_private.h"
+ #include "ppapi/c/private/ppb_net_address_private.h"
++#include "ppapi/c/private/ppb_pdf.h"
+ #include "ppapi/c/private/ppb_tcp_server_socket_private.h"
+ #include "ppapi/c/private/ppb_tcp_socket_private.h"
+ #include "ppapi/c/private/ppb_testing_private.h"
+@@ -111,6 +112,7 @@
+ #include "ppapi/proxy/ppp_instance_proxy.h"
+ #include "ppapi/proxy/ppp_messaging_proxy.h"
+ #include "ppapi/proxy/ppp_mouse_lock_proxy.h"
++#include "ppapi/proxy/ppp_pdf_proxy.h"
+ #include "ppapi/proxy/ppp_printing_proxy.h"
+ #include "ppapi/proxy/ppp_text_input_proxy.h"
+ #include "ppapi/proxy/ppp_video_decoder_proxy.h"
+@@ -183,6 +185,10 @@ InterfaceList::InterfaceList() {
+     Permission current_required_permission = PERMISSION_FLASH;
+     #include "ppapi/thunk/interfaces_ppb_private_flash.h"
+   }
++  {
++    Permission current_required_permission = PERMISSION_PDF;
++    #include "ppapi/thunk/interfaces_ppb_private_pdf.h"
++  }
+ #endif  // !BUILDFLAG(IS_NACL)
+   {
+     Permission current_required_permission = PERMISSION_DEV_CHANNEL;
+@@ -280,6 +286,8 @@ InterfaceList::InterfaceList() {
+   AddProxy(API_ID_PPP_TEXT_INPUT, &ProxyFactory<PPP_TextInput_Proxy>);
+   AddPPP(PPP_TEXTINPUT_DEV_INTERFACE, PPP_TextInput_Proxy::GetProxyInterface());
+ #if !BUILDFLAG(IS_NACL)
++  AddProxy(API_ID_PPP_PDF, &ProxyFactory<PPP_Pdf_Proxy>);
++  AddPPP(PPP_PDF_INTERFACE, PPP_Pdf_Proxy::GetProxyInterface());
+   AddProxy(API_ID_PPP_VIDEO_DECODER_DEV, &ProxyFactory<PPP_VideoDecoder_Proxy>);
+   AddPPP(PPP_VIDEODECODER_DEV_INTERFACE,
+          PPP_VideoDecoder_Proxy::GetProxyInterface());
+diff --git a/ppapi/proxy/pdf_resource.cc b/ppapi/proxy/pdf_resource.cc
+new file mode 100644
+index 0000000000000..d71cc4757758d
+--- /dev/null
++++ b/ppapi/proxy/pdf_resource.cc
+@@ -0,0 +1,32 @@
++// Copyright (c) 2013 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "ppapi/proxy/pdf_resource.h"
++
++#include "ppapi/c/pp_errors.h"
++#include "ppapi/c/private/ppb_pdf.h"
++#include "ppapi/proxy/plugin_globals.h"
++#include "ppapi/proxy/ppapi_messages.h"
++
++namespace ppapi {
++namespace proxy {
++
++PDFResource::PDFResource(Connection connection, PP_Instance instance)
++    : PluginResource(connection, instance) {
++  SendCreate(RENDERER, PpapiHostMsg_PDF_Create());
++}
++
++PDFResource::~PDFResource() {
++}
++
++thunk::PPB_PDF_API* PDFResource::AsPPB_PDF_API() {
++  return this;
++}
++
++void PDFResource::Print() {
++  Post(RENDERER, PpapiHostMsg_PDF_Print());
++}
++
++}  // namespace proxy
++}  // namespace ppapi
+diff --git a/ppapi/proxy/pdf_resource.h b/ppapi/proxy/pdf_resource.h
+new file mode 100644
+index 0000000000000..2575f5fbb9131
+--- /dev/null
++++ b/ppapi/proxy/pdf_resource.h
+@@ -0,0 +1,50 @@
++// Copyright (c) 2013 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef PPAPI_PROXY_PDF_RESOURCE_H_
++#define PPAPI_PROXY_PDF_RESOURCE_H_
++
++#include <string>
++
++#include "base/compiler_specific.h"
++#include "ppapi/c/pp_instance.h"
++#include "ppapi/c/pp_var.h"
++#include "ppapi/proxy/connection.h"
++#include "ppapi/proxy/plugin_resource.h"
++#include "ppapi/proxy/ppapi_proxy_export.h"
++#include "ppapi/thunk/ppb_pdf_api.h"
++
++namespace ppapi {
++namespace proxy {
++
++class PPAPI_PROXY_EXPORT PDFResource
++    : public PluginResource,
++      public thunk::PPB_PDF_API {
++ public:
++  PDFResource(Connection connection, PP_Instance instance);
++
++  PDFResource(const PDFResource&) = delete;
++  PDFResource& operator=(const PDFResource&) = delete;
++
++  ~PDFResource() override;
++
++  // For unittesting with a given locale.
++  void SetLocaleForTest(const std::string& locale) {
++    locale_ = locale;
++  }
++
++  // Resource override.
++  thunk::PPB_PDF_API* AsPPB_PDF_API() override;
++
++  // PPB_PDF_API implementation.
++  void Print() override;
++
++ private:
++  std::string locale_;
++};
++
++}  // namespace proxy
++}  // namespace ppapi
++
++#endif  // PPAPI_PROXY_PDF_RESOURCE_H_
+diff --git a/ppapi/proxy/ppapi_messages.h b/ppapi/proxy/ppapi_messages.h
+index 2241a7bae631e..1ef758910301a 100644
+--- a/ppapi/proxy/ppapi_messages.h
++++ b/ppapi/proxy/ppapi_messages.h
+@@ -59,6 +59,8 @@
+ #include "ppapi/c/private/ppb_host_resolver_private.h"
+ #include "ppapi/c/private/ppb_isolated_file_system_private.h"
+ #include "ppapi/c/private/ppb_net_address_private.h"
++#include "ppapi/c/private/ppb_pdf.h"
++#include "ppapi/c/private/ppp_pdf.h"
+ #include "ppapi/proxy/host_resolver_private_resource.h"
+ #include "ppapi/proxy/network_list_resource.h"
+ #include "ppapi/proxy/ppapi_param_traits.h"
+@@ -112,6 +114,7 @@ IPC_ENUM_TRAITS_MAX_VALUE(PP_PrintOrientation_Dev,
+                           PP_PRINTORIENTATION_ROTATED_LAST)
+ IPC_ENUM_TRAITS(PP_PrintOutputFormat_Dev)  // Bitmask.
+ IPC_ENUM_TRAITS_MAX_VALUE(PP_PrintScalingOption_Dev, PP_PRINTSCALINGOPTION_LAST)
++IPC_ENUM_TRAITS_MAX_VALUE(PP_PrivateDuplexMode_Dev, PP_PRIVATEDUPLEXMODE_LAST)
+ IPC_ENUM_TRAITS_MAX_VALUE(PP_PrivateFontCharset, PP_PRIVATEFONTCHARSET_LAST)
+ IPC_ENUM_TRAITS_MAX_VALUE(PP_TCPSocket_Option,
+                           PP_TCPSOCKET_OPTION_RECV_BUFFER_SIZE)
+@@ -202,6 +205,19 @@ IPC_STRUCT_TRAITS_BEGIN(PP_PrintSettings_Dev)
+   IPC_STRUCT_TRAITS_MEMBER(format)
+ IPC_STRUCT_TRAITS_END()
+ 
++IPC_STRUCT_TRAITS_BEGIN(PP_PdfPrintPresetOptions_Dev)
++  IPC_STRUCT_TRAITS_MEMBER(is_scaling_disabled)
++  IPC_STRUCT_TRAITS_MEMBER(copies)
++  IPC_STRUCT_TRAITS_MEMBER(duplex)
++  IPC_STRUCT_TRAITS_MEMBER(is_page_size_uniform)
++  IPC_STRUCT_TRAITS_MEMBER(uniform_page_size)
++IPC_STRUCT_TRAITS_END()
++
++IPC_STRUCT_TRAITS_BEGIN(PP_PdfPrintSettings_Dev)
++  IPC_STRUCT_TRAITS_MEMBER(pages_per_sheet)
++  IPC_STRUCT_TRAITS_MEMBER(scale_factor)
++IPC_STRUCT_TRAITS_END()
++
+ IPC_STRUCT_TRAITS_BEGIN(PP_URLComponent_Dev)
+   IPC_STRUCT_TRAITS_MEMBER(begin)
+   IPC_STRUCT_TRAITS_MEMBER(len)
+@@ -582,6 +598,13 @@ IPC_SYNC_MESSAGE_ROUTED2_2(PpapiMsg_PPPMessageHandler_HandleBlockingMessage,
+ IPC_MESSAGE_ROUTED1(PpapiMsg_PPPMouseLock_MouseLockLost,
+                     PP_Instance /* instance */)
+ 
++// PPP_Pdf
++IPC_SYNC_MESSAGE_ROUTED3_1(PpapiMsg_PPPPdf_PrintBegin,
++                           PP_Instance /* instance */,
++                           PP_PrintSettings_Dev /* print_settings */,
++                           PP_PdfPrintSettings_Dev /* pdf_print_settings */,
++                           int32_t /* result */)
++
+ // PPP_Printing
+ IPC_SYNC_MESSAGE_ROUTED1_1(PpapiMsg_PPPPrinting_QuerySupportedFormats,
+                            PP_Instance /* instance */,
+@@ -1798,6 +1821,14 @@ IPC_MESSAGE_CONTROL1(PpapiHostMsg_FlashFontFile_GetFontTable,
+ IPC_MESSAGE_CONTROL1(PpapiPluginMsg_FlashFontFile_GetFontTableReply,
+                      std::string /* output */)
+ 
++// PDF ------------------------------------------------------------------------
++
++// Creates the PDF resource.
++IPC_MESSAGE_CONTROL0(PpapiHostMsg_PDF_Create)
++
++// Notifies the renderer to print the current PDF.
++IPC_MESSAGE_CONTROL0(PpapiHostMsg_PDF_Print)
++
+ // VideoCapture ----------------------------------------------------------------
+ 
+ // VideoCapture_Dev, plugin -> host
+diff --git a/ppapi/proxy/ppb_instance_proxy.cc b/ppapi/proxy/ppb_instance_proxy.cc
+index 8e8554345d480..1d8882caebc02 100644
+--- a/ppapi/proxy/ppb_instance_proxy.cc
++++ b/ppapi/proxy/ppb_instance_proxy.cc
+@@ -25,6 +25,7 @@
+ #include "ppapi/proxy/isolated_file_system_private_resource.h"
+ #include "ppapi/proxy/message_handler.h"
+ #include "ppapi/proxy/network_proxy_resource.h"
++#include "ppapi/proxy/pdf_resource.h"
+ #include "ppapi/proxy/plugin_dispatcher.h"
+ #include "ppapi/proxy/ppapi_messages.h"
+ #include "ppapi/proxy/serialized_var.h"
+@@ -329,7 +330,11 @@ Resource* PPB_Instance_Proxy::GetSingletonResource(PP_Instance instance,
+     case BROWSER_FONT_SINGLETON_ID:
+       new_singleton = new BrowserFontSingletonResource(connection, instance);
+       break;
++    case PDF_SINGLETON_ID:
++      new_singleton = new PDFResource(connection, instance);
++      break;
+ #else
+     case BROWSER_FONT_SINGLETON_ID:
++    case PDF_SINGLETON_ID:
+       NOTREACHED();
+ #endif  // !BUILDFLAG(IS_NACL)
+diff --git a/ppapi/proxy/ppp_pdf_proxy.cc b/ppapi/proxy/ppp_pdf_proxy.cc
+new file mode 100644
+index 0000000000000..58d3f48ebb0de
+--- /dev/null
++++ b/ppapi/proxy/ppp_pdf_proxy.cc
+@@ -0,0 +1,81 @@
++// Copyright 2014 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "ppapi/proxy/ppp_pdf_proxy.h"
++
++#include "build/build_config.h"
++#include "ppapi/proxy/host_dispatcher.h"
++#include "ppapi/proxy/ppapi_messages.h"
++#include "ppapi/shared_impl/proxy_lock.h"
++
++namespace ppapi {
++namespace proxy {
++
++namespace {
++
++#if !BUILDFLAG(IS_NACL)
++int32_t PrintBegin(PP_Instance instance,
++                   const PP_PrintSettings_Dev* print_settings,
++                   const PP_PdfPrintSettings_Dev* pdf_print_settings) {
++  int32_t ret = 0;
++  HostDispatcher::GetForInstance(instance)->Send(new PpapiMsg_PPPPdf_PrintBegin(
++      API_ID_PPP_PDF, instance, *print_settings, *pdf_print_settings, &ret));
++  return ret;
++}
++
++const PPP_Pdf ppp_pdf_interface = {
++    &PrintBegin,
++};
++#else
++// The NaCl plugin doesn't need the host side interface - stub it out.
++const PPP_Pdf ppp_pdf_interface = {};
++#endif
++
++}  // namespace
++
++PPP_Pdf_Proxy::PPP_Pdf_Proxy(Dispatcher* dispatcher)
++    : InterfaceProxy(dispatcher),
++      ppp_pdf_(NULL) {
++  if (dispatcher->IsPlugin()) {
++    ppp_pdf_ = static_cast<const PPP_Pdf*>(
++        dispatcher->local_get_interface()(PPP_PDF_INTERFACE));
++  }
++}
++
++PPP_Pdf_Proxy::~PPP_Pdf_Proxy() {
++}
++
++// static
++const PPP_Pdf* PPP_Pdf_Proxy::GetProxyInterface() {
++  return &ppp_pdf_interface;
++}
++
++bool PPP_Pdf_Proxy::OnMessageReceived(const IPC::Message& msg) {
++  if (!dispatcher()->IsPlugin())
++    return false;
++
++  bool handled = true;
++  IPC_BEGIN_MESSAGE_MAP(PPP_Pdf_Proxy, msg)
++    IPC_MESSAGE_HANDLER(PpapiMsg_PPPPdf_PrintBegin, OnPluginMsgPrintBegin)
++    IPC_MESSAGE_UNHANDLED(handled = false)
++  IPC_END_MESSAGE_MAP()
++  return handled;
++}
++
++void PPP_Pdf_Proxy::OnPluginMsgPrintBegin(
++    PP_Instance instance,
++    const PP_PrintSettings_Dev& print_settings,
++    const PP_PdfPrintSettings_Dev& pdf_print_settings,
++    int32_t* result) {
++  if (!ppp_pdf_) {
++    *result = 0;
++    return;
++  }
++
++  *result = CallWhileUnlocked(ppp_pdf_->PrintBegin, instance, &print_settings,
++                              &pdf_print_settings);
++}
++
++}  // namespace proxy
++}  // namespace ppapi
+diff --git a/ppapi/proxy/ppp_pdf_proxy.h b/ppapi/proxy/ppp_pdf_proxy.h
+new file mode 100644
+index 0000000000000..9d034ae4862dc
+--- /dev/null
++++ b/ppapi/proxy/ppp_pdf_proxy.h
+@@ -0,0 +1,45 @@
++// Copyright 2014 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef PPAPI_PROXY_PPP_PDF_PROXY_H_
++#define PPAPI_PROXY_PPP_PDF_PROXY_H_
++
++#include "ppapi/c/private/ppp_pdf.h"
++#include "ppapi/proxy/interface_proxy.h"
++
++namespace ppapi {
++
++namespace proxy {
++
++class PPP_Pdf_Proxy : public InterfaceProxy {
++ public:
++  explicit PPP_Pdf_Proxy(Dispatcher* dispatcher);
++
++  PPP_Pdf_Proxy(const PPP_Pdf_Proxy&) = delete;
++  PPP_Pdf_Proxy& operator=(const PPP_Pdf_Proxy&) = delete;
++
++  ~PPP_Pdf_Proxy() override;
++
++  static const PPP_Pdf* GetProxyInterface();
++
++  // InterfaceProxy implementation.
++  bool OnMessageReceived(const IPC::Message& msg) override;
++
++ private:
++  // Message handlers.
++  void OnPluginMsgPrintBegin(PP_Instance instance,
++                             const PP_PrintSettings_Dev& print_settings,
++                             const PP_PdfPrintSettings_Dev& pdf_print_settings,
++                             int32_t* result);
++
++  // When this proxy is in the plugin side, this value caches the interface
++  // pointer so we don't have to retrieve it from the dispatcher each time.
++  // In the host, this value is always NULL.
++  const PPP_Pdf* ppp_pdf_;
++};
++
++}  // namespace proxy
++}  // namespace ppapi
++
++#endif  // PPAPI_PROXY_PPP_PDF_PROXY_H_
+diff --git a/ppapi/shared_impl/api_id.h b/ppapi/shared_impl/api_id.h
+index e0cfa3136d83c..4845f96c93e89 100644
+--- a/ppapi/shared_impl/api_id.h
++++ b/ppapi/shared_impl/api_id.h
+@@ -33,6 +33,7 @@ enum ApiID {
+   API_ID_PPP_INSTANCE_PRIVATE,
+   API_ID_PPP_MESSAGING,
+   API_ID_PPP_MOUSE_LOCK,
++  API_ID_PPP_PDF,
+   API_ID_PPP_PRINTING,
+   API_ID_PPP_TEXT_INPUT,
+   API_ID_PPP_VIDEO_DECODER_DEV,
+diff --git a/ppapi/shared_impl/resource.h b/ppapi/shared_impl/resource.h
+index 80caef47be948..e5df24e75fbbc 100644
+--- a/ppapi/shared_impl/resource.h
++++ b/ppapi/shared_impl/resource.h
+@@ -53,6 +53,7 @@
+   F(PPB_NetworkList_API)                \
+   F(PPB_NetworkMonitor_API)             \
+   F(PPB_NetworkProxy_API)               \
++  F(PPB_PDF_API)                        \
+   F(PPB_Printing_API)                   \
+   F(PPB_Scrollbar_API)                  \
+   F(PPB_TCPServerSocket_Private_API)    \
+diff --git a/ppapi/shared_impl/singleton_resource_id.h b/ppapi/shared_impl/singleton_resource_id.h
+index 6066f725d852d..b41a34dd22197 100644
+--- a/ppapi/shared_impl/singleton_resource_id.h
++++ b/ppapi/shared_impl/singleton_resource_id.h
+@@ -15,6 +15,7 @@ enum SingletonResourceID {
+   GAMEPAD_SINGLETON_ID,
+   ISOLATED_FILESYSTEM_SINGLETON_ID,
+   NETWORK_PROXY_SINGLETON_ID,
++  PDF_SINGLETON_ID,
+   UMA_SINGLETON_ID,
+ };
+ 
+diff --git a/ppapi/tests/all_c_includes.h b/ppapi/tests/all_c_includes.h
+index 6f9ed9d3902fd..71e8a000d07ce 100644
+--- a/ppapi/tests/all_c_includes.h
++++ b/ppapi/tests/all_c_includes.h
+@@ -103,6 +103,7 @@
+ #include "ppapi/c/private/ppb_host_resolver_private.h"
+ #include "ppapi/c/private/ppb_instance_private.h"
+ #include "ppapi/c/private/ppb_net_address_private.h"
++#include "ppapi/c/private/ppb_pdf.h"
+ #include "ppapi/c/private/ppb_proxy_private.h"
+ #include "ppapi/c/private/ppb_tcp_socket_private.h"
+ #include "ppapi/c/private/ppb_testing_private.h"
+diff --git a/ppapi/thunk/BUILD.gn b/ppapi/thunk/BUILD.gn
+index f2a70e53a2415..2228cf3cdc77a 100644
+--- a/ppapi/thunk/BUILD.gn
++++ b/ppapi/thunk/BUILD.gn
+@@ -106,6 +106,7 @@ source_set("thunk") {
+     "ppb_network_monitor_thunk.cc",
+     "ppb_network_proxy_api.h",
+     "ppb_network_proxy_thunk.cc",
++    "ppb_pdf_api.h",
+     "ppb_printing_api.h",
+     "ppb_printing_dev_thunk.cc",
+     "ppb_tcp_server_socket_private_api.h",
+@@ -156,6 +157,7 @@ source_set("thunk") {
+       "ppb_char_set_thunk.cc",
+       "ppb_flash_font_file_thunk.cc",
+       "ppb_gles_chromium_texture_mapping_thunk.cc",
++      "ppb_pdf_thunk.cc",
+       "ppb_url_util_thunk.cc",
+       "ppb_video_capture_thunk.cc",
+       "ppb_video_decoder_dev_thunk.cc",
+diff --git a/ppapi/thunk/OWNERS b/ppapi/thunk/OWNERS
+new file mode 100644
+index 0000000000000..926c489e09f46
+--- /dev/null
++++ b/ppapi/thunk/OWNERS
+@@ -0,0 +1,3 @@
++per-file interfaces_ppb_private_pdf.h=thestig@chromium.org
++per-file ppb_pdf_thunk.cc=thestig@chromium.org
++per-file ppb_pdf_api.h=thestig@chromium.org
+diff --git a/ppapi/thunk/interfaces_ppb_private_pdf.h b/ppapi/thunk/interfaces_ppb_private_pdf.h
+new file mode 100644
+index 0000000000000..008e31028193c
+--- /dev/null
++++ b/ppapi/thunk/interfaces_ppb_private_pdf.h
+@@ -0,0 +1,19 @@
++// Copyright 2018 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++// Please see inteface_ppb_public_stable for the documentation on the format of
++// this file.
++
++// no-include-guard-because-multiply-included
++
++#include "build/build_config.h"
++#include "ppapi/thunk/interfaces_preamble.h"
++
++// See interfaces_ppb_private_no_permissions.h for other private interfaces.
++
++#if !BUILDFLAG(IS_NACL)
++PROXIED_IFACE(PPB_PDF_INTERFACE, PPB_PDF)
++#endif  // !BUILDFLAG(IS_NACL)
++
++#include "ppapi/thunk/interfaces_postamble.h"
+diff --git a/ppapi/thunk/ppb_pdf_api.h b/ppapi/thunk/ppb_pdf_api.h
+new file mode 100644
+index 0000000000000..a19b85e3136c0
+--- /dev/null
++++ b/ppapi/thunk/ppb_pdf_api.h
+@@ -0,0 +1,24 @@
++// Copyright (c) 2011 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef PPAPI_THUNK_PPB_PDF_API_H_
++#define PPAPI_THUNK_PPB_PDF_API_H_
++
++#include "ppapi/c/private/ppb_pdf.h"
++#include "ppapi/shared_impl/singleton_resource_id.h"
++
++namespace ppapi {
++namespace thunk {
++
++class PPB_PDF_API {
++ public:
++  virtual void Print() = 0;
++
++  static const SingletonResourceID kSingletonResourceID = PDF_SINGLETON_ID;
++};
++
++}  // namespace thunk
++}  // namespace ppapi
++
++#endif  // PPAPI_THUNK_PPB_PDF_API_H_
+diff --git a/ppapi/thunk/ppb_pdf_thunk.cc b/ppapi/thunk/ppb_pdf_thunk.cc
+new file mode 100644
+index 0000000000000..310e5191bddae
+--- /dev/null
++++ b/ppapi/thunk/ppb_pdf_thunk.cc
+@@ -0,0 +1,32 @@
++// Copyright (c) 2013 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "ppapi/c/private/ppb_pdf.h"
++#include "ppapi/thunk/enter.h"
++#include "ppapi/thunk/ppb_pdf_api.h"
++#include "ppapi/thunk/thunk.h"
++
++namespace ppapi {
++namespace thunk {
++
++namespace {
++
++void Print(PP_Instance instance) {
++  EnterInstanceAPI<PPB_PDF_API> enter(instance);
++  if (enter.succeeded())
++    enter.functions()->Print();
++}
++
++const PPB_PDF g_ppb_pdf_thunk = {
++    &Print,
++};
++
++}  // namespace
++
++const PPB_PDF* GetPPB_PDF_Thunk() {
++  return &g_ppb_pdf_thunk;
++}
++
++}  // namespace thunk
++}  // namespace ppapi
+diff --git a/ppapi/thunk/thunk.h b/ppapi/thunk/thunk.h
+index f01f0e4857944..99a24c6d708e3 100644
+--- a/ppapi/thunk/thunk.h
++++ b/ppapi/thunk/thunk.h
+@@ -21,6 +21,7 @@
+ #include "ppapi/thunk/interfaces_ppb_private.h"
+ #include "ppapi/thunk/interfaces_ppb_private_flash.h"
+ #include "ppapi/thunk/interfaces_ppb_private_no_permissions.h"
++#include "ppapi/thunk/interfaces_ppb_private_pdf.h"
+ #include "ppapi/thunk/interfaces_ppb_public_dev.h"
+ #include "ppapi/thunk/interfaces_ppb_public_dev_channel.h"
+ #include "ppapi/thunk/interfaces_ppb_public_socket.h"

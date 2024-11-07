@@ -1,0 +1,1 @@
+Remove a11y code specific to the PPAPI PDF Viewer.    2022-03-09 07:18:22    367a283ecc01d27e23a98a3a40f529cf955ab2be

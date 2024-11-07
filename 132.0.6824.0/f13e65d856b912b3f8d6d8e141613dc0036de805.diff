@@ -1,0 +1,97 @@
+diff --git a/content/public/common/sandboxed_process_launcher_delegate.cc b/content/public/common/sandboxed_process_launcher_delegate.cc
+index 8656215a70901..9c1aa450f32b6 100644
+--- a/content/public/common/sandboxed_process_launcher_delegate.cc
++++ b/content/public/common/sandboxed_process_launcher_delegate.cc
+@@ -44,6 +44,10 @@ bool SandboxedProcessLauncherDelegate::ShouldUnsandboxedRunInJob() {
+ bool SandboxedProcessLauncherDelegate::CetCompatible() {
+   return true;
+ }
++
++bool SandboxedProcessLauncherDelegate::AllowWindowsFontsDir() {
++  return false;
++}
+ #endif  // BUILDFLAG(IS_WIN)
+ 
+ #if BUILDFLAG(IS_WIN)
+diff --git a/content/public/common/sandboxed_process_launcher_delegate.h b/content/public/common/sandboxed_process_launcher_delegate.h
+index 4b2ea0e2680c5..cb43aa14c9742 100644
+--- a/content/public/common/sandboxed_process_launcher_delegate.h
++++ b/content/public/common/sandboxed_process_launcher_delegate.h
+@@ -38,6 +38,7 @@ class CONTENT_EXPORT SandboxedProcessLauncherDelegate
+   void PostSpawnTarget(base::ProcessHandle process) override;
+   bool ShouldUnsandboxedRunInJob() override;
+   bool CetCompatible() override;
++  bool AllowWindowsFontsDir() override;
+ #endif  // BUILDFLAG(IS_WIN)
+ 
+ #if BUILDFLAG(IS_WIN)
+diff --git a/sandbox/policy/sandbox_delegate.h b/sandbox/policy/sandbox_delegate.h
+index 4d0372e13ccd8..929c668ef9638 100644
+--- a/sandbox/policy/sandbox_delegate.h
++++ b/sandbox/policy/sandbox_delegate.h
+@@ -62,6 +62,8 @@ class SandboxDelegate {
+   // Technology (CET) / Hardware-enforced Stack Protection.
+   virtual bool CetCompatible() = 0;
+ 
++  // Whether this process will need to directly access the Windows fonts dir.
++  virtual bool AllowWindowsFontsDir() = 0;
+ #endif  // BUILDFLAG(IS_WIN)
+ };
+ 
+diff --git a/sandbox/policy/win/sandbox_win.cc b/sandbox/policy/win/sandbox_win.cc
+index 9ded24586ff08..a63046248acda 100644
+--- a/sandbox/policy/win/sandbox_win.cc
++++ b/sandbox/policy/win/sandbox_win.cc
+@@ -153,6 +153,29 @@ class SandboxLaunchTimer {
+              "EnableCsrssLockdown",
+              base::FEATURE_DISABLED_BY_DEFAULT);
+ 
++// Adds the policy rules to allow read-only access to the windows system fonts
++// directory, and any subdirectories. Used by PDF renderers.
++bool AddWindowsFontsDir(TargetConfig* config) {
++  DCHECK(!config->IsConfigured());
++  base::FilePath directory;
++  if (!base::PathService::Get(base::DIR_WINDOWS_FONTS, &directory)) {
++    return false;
++  }
++
++  ResultCode result = config->AllowFileAccess(FileSemantics::kAllowReadonly,
++                                              directory.value().c_str());
++  if (result != SBOX_ALL_OK)
++    return false;
++
++  std::wstring directory_str = directory.value() + L"\\*";
++  result = config->AllowFileAccess(FileSemantics::kAllowReadonly,
++                                   directory_str.c_str());
++  if (result != SBOX_ALL_OK)
++    return false;
++
++  return true;
++}
++
+ // Return a mapping between the long and short names for all loaded modules in
+ // the current process. The mapping excludes modules which don't have a typical
+ // short name, e.g. EXAMPL~1.DLL.
+@@ -620,6 +643,10 @@ ResultCode GenerateConfigForSandboxedProcess(const base::CommandLine& cmd_line,
+     config->AddRestrictingRandomSid();
+   }
+ 
++  if (delegate->AllowWindowsFontsDir()) {
++    AddWindowsFontsDir(config);
++  }
++
+   result = AddGenericConfig(config);
+   if (result != SBOX_ALL_OK) {
+     NOTREACHED();
+diff --git a/sandbox/policy/win/sandbox_win_unittest.cc b/sandbox/policy/win/sandbox_win_unittest.cc
+index 4919bf95055eb..c43cd33d1a6a0 100644
+--- a/sandbox/policy/win/sandbox_win_unittest.cc
++++ b/sandbox/policy/win/sandbox_win_unittest.cc
+@@ -434,6 +434,7 @@ class TestSandboxDelegate : public SandboxDelegate {
+   bool ShouldUnsandboxedRunInJob() override { return false; }
+ 
+   bool CetCompatible() override { return true; }
++  bool AllowWindowsFontsDir() override { return true; }
+ 
+  private:
+   sandbox::mojom::Sandbox sandbox_type_;

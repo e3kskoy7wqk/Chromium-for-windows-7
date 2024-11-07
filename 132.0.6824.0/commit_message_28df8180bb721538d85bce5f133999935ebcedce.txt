@@ -1,0 +1,1 @@
+Drop Windows support for PPAPI sandbox type    2024-09-24 16:37:45    28df8180bb721538d85bce5f133999935ebcedce
