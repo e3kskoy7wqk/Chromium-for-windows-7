@@ -1,0 +1,1313 @@
+diff --git a/chrome/common/ppapi_utils.cc b/chrome/common/ppapi_utils.cc
+index 862778c33ed00..dc26dad3c9c8d 100644
+--- a/chrome/common/ppapi_utils.cc
++++ b/chrome/common/ppapi_utils.cc
+@@ -73,6 +73,7 @@
+ #include "ppapi/c/private/ppb_ext_crx_file_system_private.h"
+ #include "ppapi/c/private/ppb_file_io_private.h"
+ #include "ppapi/c/private/ppb_file_ref_private.h"
++#include "ppapi/c/private/ppb_find_private.h"
+ #include "ppapi/c/private/ppb_flash_font_file.h"
+ #include "ppapi/c/private/ppb_host_resolver_private.h"
+ #include "ppapi/c/private/ppb_isolated_file_system_private.h"
+diff --git a/content/renderer/pepper/pepper_plugin_instance_impl.cc b/content/renderer/pepper/pepper_plugin_instance_impl.cc
+index db62278fa179a..9ab72317f707b 100644
+--- a/content/renderer/pepper/pepper_plugin_instance_impl.cc
++++ b/content/renderer/pepper/pepper_plugin_instance_impl.cc
+@@ -60,6 +60,8 @@
+ #include "ppapi/c/ppp_instance.h"
+ #include "ppapi/c/ppp_messaging.h"
+ #include "ppapi/c/ppp_mouse_lock.h"
++#include "ppapi/c/private/ppb_find_private.h"
++#include "ppapi/c/private/ppp_find_private.h"
+ #include "ppapi/c/private/ppp_instance_private.h"
+ #include "ppapi/c/private/ppp_pdf.h"
+ #include "ppapi/host/ppapi_host.h"
+@@ -367,6 +369,22 @@ bool IsPrintPreviewUrl(const GURL& document_url) {
+          url::Origin::Create(GURL(kChromePrint));
+ }
+ 
++WebElement FindPdfViewerScroller(const WebLocalFrame* frame,
++                                 const WebElement& plugin) {
++  if (!plugin.HasAttribute("pdf-viewer-update-enabled"))
++    return WebElement();
++
++  WebElement viewer = frame->GetDocument().GetElementById("viewer");
++  if (viewer.IsNull())
++    return WebElement();
++
++  blink::WebNode shadow_root = viewer.ShadowRoot();
++  if (shadow_root.IsNull())
++    return WebElement();
++
++  return shadow_root.QuerySelector("#scroller");
++}
++
+ // Stolen from //printing/units.{cc,h}
+ 
+ // Length of an inch in CSS's 1pt unit.
+@@ -489,6 +507,7 @@ PepperPluginInstanceImpl::PepperPluginInstanceImpl(
+       bound_graphics_2d_platform_(nullptr),
+       has_webkit_focus_(false),
+       find_identifier_(-1),
++      plugin_find_interface_(nullptr),
+       plugin_input_event_interface_(nullptr),
+       plugin_mouse_lock_interface_(nullptr),
+       plugin_pdf_interface_(nullptr),
+@@ -1455,6 +1474,47 @@ void PepperPluginInstanceImpl::RequestSurroundingText(
+       pp_instance(), desired_number_of_characters);
+ }
+ 
++bool PepperPluginInstanceImpl::StartFind(const std::string& search_text,
++                                         bool case_sensitive,
++                                         int identifier) {
++  // Keep a reference on the stack. See NOTE above.
++  scoped_refptr<PepperPluginInstanceImpl> ref(this);
++  if (!LoadFindInterface())
++    return false;
++  find_identifier_ = identifier;
++  return PP_ToBool(plugin_find_interface_->StartFind(
++      pp_instance(), search_text.c_str(), PP_FromBool(case_sensitive)));
++}
++
++void PepperPluginInstanceImpl::SelectFindResult(bool forward, int identifier) {
++  // Keep a reference on the stack. See NOTE above.
++  scoped_refptr<PepperPluginInstanceImpl> ref(this);
++  if (!LoadFindInterface())
++    return;
++  find_identifier_ = identifier;
++  plugin_find_interface_->SelectFindResult(pp_instance(), PP_FromBool(forward));
++}
++
++void PepperPluginInstanceImpl::StopFind() {
++  // Keep a reference on the stack. See NOTE above.
++  scoped_refptr<PepperPluginInstanceImpl> ref(this);
++  if (!LoadFindInterface())
++    return;
++  find_identifier_ = -1;
++  plugin_find_interface_->StopFind(pp_instance());
++}
++
++bool PepperPluginInstanceImpl::LoadFindInterface() {
++  if (!module_->permissions().HasPermission(ppapi::PERMISSION_PDF))
++    return false;
++  if (!plugin_find_interface_) {
++    plugin_find_interface_ = static_cast<const PPP_Find_Private*>(
++        module_->GetPluginInterface(PPP_FIND_PRIVATE_INTERFACE));
++  }
++
++  return !!plugin_find_interface_;
++}
++
+ bool PepperPluginInstanceImpl::LoadInputEventInterface() {
+   if (!checked_for_plugin_input_event_interface_) {
+     checked_for_plugin_input_event_interface_ = true;
+@@ -2294,6 +2354,64 @@ PP_Var PepperPluginInstanceImpl::GetDefaultCharSet(PP_Instance instance) {
+                                       .default_encoding);
+ }
+ 
++void PepperPluginInstanceImpl::SetPluginToHandleFindRequests(
++    PP_Instance instance) {
++  if (!LoadFindInterface())
++    return;
++  bool is_main_frame = render_frame_ && render_frame_->IsMainFrame();
++  if (!is_main_frame)
++    return;
++  container_->UsePluginAsFindHandler();
++}
++
++void PepperPluginInstanceImpl::NumberOfFindResultsChanged(
++    PP_Instance instance,
++    int32_t total,
++    PP_Bool final_result) {
++  // After stopping search and setting find_identifier_ to -1 there still may be
++  // a NumberOfFindResultsChanged notification pending from plug-in. Just ignore
++  // them.
++  if (find_identifier_ == -1)
++    return;
++  if (!container_)
++    return;
++  container_->ReportFindInPageMatchCount(find_identifier_, total,
++                                         PP_ToBool(final_result));
++}
++
++void PepperPluginInstanceImpl::SelectedFindResultChanged(PP_Instance instance,
++                                                         int32_t index,
++    PP_Bool final_result) {
++  if (find_identifier_ == -1)
++    return;
++  if (!container_)
++    return;
++  container_->ReportFindInPageSelection(find_identifier_, index + 1, final_result);
++}
++
++void PepperPluginInstanceImpl::SetTickmarks(PP_Instance instance,
++                                            const PP_Rect* tickmarks,
++                                            uint32_t count) {
++  if (!render_frame_ || !render_frame_->GetWebFrame())
++    return;
++
++  blink::WebVector<gfx::Rect> tickmarks_converted(static_cast<size_t>(count));
++  for (uint32_t i = 0; i < count; ++i) {
++    gfx::RectF tickmark(tickmarks[i].point.x,
++                        tickmarks[i].point.y,
++                        tickmarks[i].size.width,
++                        tickmarks[i].size.height);
++    tickmark.Scale(1 / viewport_to_dip_scale_);
++    tickmarks_converted[i] = gfx::ToEnclosedRect(tickmark);
++  }
++
++  WebLocalFrame* frame = render_frame_->GetWebFrame();
++  WebElement target;
++  if (LoadPdfInterface())
++    target = FindPdfViewerScroller(frame, container_->GetElement());
++  frame->SetTickmarks(target, tickmarks_converted);
++}
++
+ PP_Bool PepperPluginInstanceImpl::IsFullscreen(PP_Instance instance) {
+   return PP_FromBool(view_data_.is_fullscreen);
+ }
+@@ -2599,6 +2716,7 @@ PP_ExternalPluginResult PepperPluginInstanceImpl::ResetAsProxied(
+ 
+   instance_interface_.reset(ppp_instance_combined);
+   // Clear all PPP interfaces we may have cached.
++  plugin_find_interface_ = nullptr;
+   plugin_input_event_interface_ = nullptr;
+   checked_for_plugin_input_event_interface_ = false;
+   plugin_mouse_lock_interface_ = nullptr;
+diff --git a/content/renderer/pepper/pepper_plugin_instance_impl.h b/content/renderer/pepper/pepper_plugin_instance_impl.h
+index a9a2fe3a2551e..68f28f224e68f 100644
+--- a/content/renderer/pepper/pepper_plugin_instance_impl.h
++++ b/content/renderer/pepper/pepper_plugin_instance_impl.h
+@@ -45,6 +45,7 @@
+ #include "ppapi/c/ppp_graphics_3d.h"
+ #include "ppapi/c/ppp_input_event.h"
+ #include "ppapi/c/ppp_mouse_lock.h"
++#include "ppapi/c/private/ppp_find_private.h"
+ #include "ppapi/c/private/ppp_instance_private.h"
+ #include "ppapi/c/private/ppp_pdf.h"
+ #include "ppapi/shared_impl/ppb_instance_shared.h"
+@@ -275,6 +276,11 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
+   std::u16string GetSelectedText(bool html);
+   std::u16string GetLinkAtPosition(const gfx::Point& point);
+   void RequestSurroundingText(size_t desired_number_of_characters);
++  bool StartFind(const std::string& search_text,
++                 bool case_sensitive,
++                 int identifier);
++  void SelectFindResult(bool forward, int identifier);
++  void StopFind();
+ 
+   bool SupportsPrintInterface();
+   int PrintBegin(const blink::WebPrintParams& print_params);
+@@ -398,6 +404,14 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
+   uint32_t GetAudioHardwareOutputSampleRate(PP_Instance instance) override;
+   uint32_t GetAudioHardwareOutputBufferSize(PP_Instance instance) override;
+   PP_Var GetDefaultCharSet(PP_Instance instance) override;
++  void SetPluginToHandleFindRequests(PP_Instance) override;
++  void NumberOfFindResultsChanged(PP_Instance instance,
++                                  int32_t total,
++                                  PP_Bool final_result) override;
++  void SelectedFindResultChanged(PP_Instance instance, int32_t index, PP_Bool final_result) override;
++  void SetTickmarks(PP_Instance instance,
++                    const PP_Rect* tickmarks,
++                    uint32_t count) override;
+   PP_Bool IsFullscreen(PP_Instance instance) override;
+   PP_Bool SetFullscreen(PP_Instance instance, PP_Bool fullscreen) override;
+   PP_Bool GetScreenSize(PP_Instance instance, PP_Size* size) override;
+@@ -534,6 +548,7 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
+                            const GURL& plugin_url,
+                            v8::Isolate* isolate);
+ 
++  bool LoadFindInterface();
+   bool LoadInputEventInterface();
+   bool LoadMouseLockInterface();
+   bool LoadPdfInterface();
+@@ -699,6 +714,7 @@ class CONTENT_EXPORT PepperPluginInstanceImpl
+ 
+   // The plugin-provided interfaces.
+   // When adding PPP interfaces, make sure to reset them in ResetAsProxied.
++  raw_ptr<const PPP_Find_Private> plugin_find_interface_;
+   raw_ptr<const PPP_InputEvent> plugin_input_event_interface_;
+   raw_ptr<const PPP_MouseLock> plugin_mouse_lock_interface_;
+   raw_ptr<const PPP_Pdf> plugin_pdf_interface_;
+diff --git a/content/renderer/pepper/pepper_webplugin_impl.cc b/content/renderer/pepper/pepper_webplugin_impl.cc
+index 940455c611bd6..7b1bc5cd65388 100644
+--- a/content/renderer/pepper/pepper_webplugin_impl.cc
++++ b/content/renderer/pepper/pepper_webplugin_impl.cc
+@@ -390,6 +390,30 @@ WebURL PepperWebPluginImpl::LinkAtPosition(const gfx::Point& position) const {
+   return GURL(instance_->GetLinkAtPosition(position));
+ }
+ 
++bool PepperWebPluginImpl::StartFind(const blink::WebString& search_text,
++                                    bool case_sensitive,
++                                    int identifier) {
++  // Re-entrancy may cause JS to try to execute script on the plugin before it
++  // is fully initialized. See: crbug.com/715747.
++  if (!instance_)
++    return false;
++  return instance_->StartFind(search_text.Utf8(), case_sensitive, identifier);
++}
++
++void PepperWebPluginImpl::SelectFindResult(bool forward, int identifier) {
++  // Re-entrancy may cause JS to try to execute script on the plugin before it
++  // is fully initialized. See: crbug.com/715747.
++  if (instance_)
++    instance_->SelectFindResult(forward, identifier);
++}
++
++void PepperWebPluginImpl::StopFind() {
++  // Re-entrancy may cause JS to try to execute script on the plugin before it
++  // is fully initialized. See: crbug.com/715747.
++  if (instance_)
++    instance_->StopFind();
++}
++
+ bool PepperWebPluginImpl::SupportsPaginatedPrint() {
+   // Re-entrancy may cause JS to try to execute script on the plugin before it
+   // is fully initialized. See: crbug.com/715747.
+diff --git a/content/renderer/pepper/pepper_webplugin_impl.h b/content/renderer/pepper/pepper_webplugin_impl.h
+index 2c4c46f9de601..4e38562ae69cf 100644
+--- a/content/renderer/pepper/pepper_webplugin_impl.h
++++ b/content/renderer/pepper/pepper_webplugin_impl.h
+@@ -71,6 +71,11 @@ class PepperWebPluginImpl : public blink::WebPlugin {
+   blink::WebURL LinkAtPosition(const gfx::Point& position) const override;
+   bool GetPrintPresetOptionsFromDocument(
+       blink::WebPrintPresetOptions* preset_options) override;
++  bool StartFind(const blink::WebString& search_text,
++                 bool case_sensitive,
++                 int identifier) override;
++  void SelectFindResult(bool forward, int identifier) override;
++  void StopFind() override;
+   bool SupportsPaginatedPrint() override;
+ 
+   int PrintBegin(const blink::WebPrintParams& print_params) override;
+diff --git a/content/renderer/pepper/plugin_module.cc b/content/renderer/pepper/plugin_module.cc
+index 3892b02f11c7a..11a285d180f89 100644
+--- a/content/renderer/pepper/plugin_module.cc
++++ b/content/renderer/pepper/plugin_module.cc
+@@ -104,6 +104,7 @@
+ #include "ppapi/c/private/ppb_ext_crx_file_system_private.h"
+ #include "ppapi/c/private/ppb_file_io_private.h"
+ #include "ppapi/c/private/ppb_file_ref_private.h"
++#include "ppapi/c/private/ppb_find_private.h"
+ #include "ppapi/c/private/ppb_flash_font_file.h"
+ #include "ppapi/c/private/ppb_host_resolver_private.h"
+ #include "ppapi/c/private/ppb_instance_private.h"
+diff --git a/ppapi/api/private/ppb_find_private.idl b/ppapi/api/private/ppb_find_private.idl
+new file mode 100644
+index 0000000000000..e6f7cfa728353
+--- /dev/null
++++ b/ppapi/api/private/ppb_find_private.idl
+@@ -0,0 +1,67 @@
++/* Copyright 2014 The Chromium Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++/**
++ * This file defines the <code>PPB_Find_Private</code> interface.
++ */
++
++[generate_thunk]
++
++label Chrome {
++  M14 = 0.3
++};
++
++/**
++ * This is a private interface for doing browser Find in the PDF plugin.
++ */
++interface PPB_Find_Private {
++  /**
++   * Sets the instance of this plugin as the mechanism that will be used to
++   * handle find requests in the renderer. This will only succeed if the plugin
++   * is embedded within the content of the top level frame. Note that this will
++   * result in the renderer handing over all responsibility for doing find to
++   * the plugin and content from the rest of the page will not be searched.
++   *
++   *
++   * In the case that the plugin is loaded directly as the top level document,
++   * this function does not need to be called. In that case the plugin is
++   * assumed to handle find requests.
++   *
++   * There can only be one plugin which handles find requests. If a plugin calls
++   * this while an existing plugin is registered, the existing plugin will be
++   * de-registered and will no longer receive any requests.
++   */
++  void SetPluginToHandleFindRequests(
++      [in] PP_Instance instance);
++
++  /**
++   * Updates the number of find results for the current search term.  If
++   * there are no matches 0 should be passed in.  Only when the plugin has
++   * finished searching should it pass in the final count with final_result set
++   * to PP_TRUE.
++   */
++  void NumberOfFindResultsChanged(
++      [in] PP_Instance instance,
++      [in] int32_t total,
++      [in] PP_Bool final_result);
++
++  /**
++   * Updates the index of the currently selected search item.
++   */
++  void SelectedFindResultChanged(
++      [in] PP_Instance instance,
++      [in] int32_t index,
++      [in] PP_Bool final_result);
++
++  /**
++   * Updates the tickmarks on the scrollbar for the find request. |tickmarks|
++   * contains |count| PP_Rects indicating the tickmark ranges.
++   */
++  void SetTickmarks(
++      [in] PP_Instance instance,
++      [in, size_as=count] PP_Rect[] tickmarks,
++      [in] uint32_t count);
++};
++
+diff --git a/ppapi/api/private/ppp_find_private.idl b/ppapi/api/private/ppp_find_private.idl
+new file mode 100644
+index 0000000000000..bb6580c02f2f0
+--- /dev/null
++++ b/ppapi/api/private/ppp_find_private.idl
+@@ -0,0 +1,35 @@
++/* Copyright 2014 The Chromium Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++label Chrome {
++  M14 = 0.3
++};
++
++interface PPP_Find_Private {
++  /**
++   * Finds the given UTF-8 text starting at the current selection. The number of
++   * results will be updated asynchronously via NumberOfFindResultsChanged in
++   * PPB_Find. Note that multiple StartFind calls can happen before StopFind is
++   * called in the case of the search term changing.
++   *
++   * Return PP_FALSE if the plugin doesn't support find in page. Consequently,
++   * it won't call any callbacks.
++   */
++  PP_Bool StartFind([in] PP_Instance instance,
++                    [in] str_t text,
++                    [in] PP_Bool case_sensitive);
++
++  /**
++   * Go to the next/previous result.
++   */
++  void SelectFindResult([in] PP_Instance instance,
++                        [in] PP_Bool forward);
++
++  /**
++   * Tells the plugin that the find operation has stopped, so it should clear
++   * any highlighting.
++   */
++  void StopFind([in] PP_Instance instance);
++};
+diff --git a/ppapi/c/BUILD.gn b/ppapi/c/BUILD.gn
+index 073f4671f949f..d2aad13d1ab25 100644
+--- a/ppapi/c/BUILD.gn
++++ b/ppapi/c/BUILD.gn
+@@ -118,6 +118,7 @@ source_set("c") {
+     "private/ppb_ext_crx_file_system_private.h",
+     "private/ppb_file_io_private.h",
+     "private/ppb_file_ref_private.h",
++    "private/ppb_find_private.h",
+     "private/ppb_flash_font_file.h",
+     "private/ppb_host_resolver_private.h",
+     "private/ppb_instance_private.h",
+@@ -131,6 +132,7 @@ source_set("c") {
+     "private/ppb_udp_socket_private.h",
+     "private/ppb_uma_private.h",
+     "private/ppb_x509_certificate_private.h",
++    "private/ppp_find_private.h",
+     "private/ppp_instance_private.h",
+     "private/ppp_pdf.h",
+     "private/ppp_pexe_stream_handler.h",
+diff --git a/ppapi/c/private/ppb_find_private.h b/ppapi/c/private/ppb_find_private.h
+new file mode 100644
+index 0000000000000..09ebab00137b4
+--- /dev/null
++++ b/ppapi/c/private/ppb_find_private.h
+@@ -0,0 +1,81 @@
++/* Copyright 2014 The Chromium Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++/* From private/ppb_find_private.idl modified Wed Mar 19 13:42:13 2014. */
++
++#ifndef PPAPI_C_PRIVATE_PPB_FIND_PRIVATE_H_
++#define PPAPI_C_PRIVATE_PPB_FIND_PRIVATE_H_
++
++#include "ppapi/c/pp_bool.h"
++#include "ppapi/c/pp_instance.h"
++#include "ppapi/c/pp_macros.h"
++#include "ppapi/c/pp_point.h"
++#include "ppapi/c/pp_rect.h"
++#include "ppapi/c/pp_size.h"
++#include "ppapi/c/pp_stdint.h"
++
++#define PPB_FIND_PRIVATE_INTERFACE_0_3 "PPB_Find_Private;0.3"
++#define PPB_FIND_PRIVATE_INTERFACE PPB_FIND_PRIVATE_INTERFACE_0_3
++
++/**
++ * @file
++ * This file defines the <code>PPB_Find_Private</code> interface.
++ */
++
++
++/**
++ * @addtogroup Interfaces
++ * @{
++ */
++/**
++ * This is a private interface for doing browser Find in the PDF plugin.
++ */
++struct PPB_Find_Private_0_3 {
++  /**
++   * Sets the instance of this plugin as the mechanism that will be used to
++   * handle find requests in the renderer. This will only succeed if the plugin
++   * is embedded within the content of the top level frame. Note that this will
++   * result in the renderer handing over all responsibility for doing find to
++   * the plugin and content from the rest of the page will not be searched.
++   *
++   *
++   * In the case that the plugin is loaded directly as the top level document,
++   * this function does not need to be called. In that case the plugin is
++   * assumed to handle find requests.
++   *
++   * There can only be one plugin which handles find requests. If a plugin calls
++   * this while an existing plugin is registered, the existing plugin will be
++   * de-registered and will no longer receive any requests.
++   */
++  void (*SetPluginToHandleFindRequests)(PP_Instance instance);
++  /**
++   * Updates the number of find results for the current search term.  If
++   * there are no matches 0 should be passed in.  Only when the plugin has
++   * finished searching should it pass in the final count with final_result set
++   * to PP_TRUE.
++   */
++  void (*NumberOfFindResultsChanged)(PP_Instance instance,
++                                     int32_t total,
++                                     PP_Bool final_result);
++  /**
++   * Updates the index of the currently selected search item.
++   */
++  void (*SelectedFindResultChanged)(PP_Instance instance, int32_t index, PP_Bool final_result);
++  /**
++   * Updates the tickmarks on the scrollbar for the find request. |tickmarks|
++   * contains |count| PP_Rects indicating the tickmark ranges.
++   */
++  void (*SetTickmarks)(PP_Instance instance,
++                       const struct PP_Rect tickmarks[],
++                       uint32_t count);
++};
++
++typedef struct PPB_Find_Private_0_3 PPB_Find_Private;
++/**
++ * @}
++ */
++
++#endif  /* PPAPI_C_PRIVATE_PPB_FIND_PRIVATE_H_ */
++
+diff --git a/ppapi/c/private/ppp_find_private.h b/ppapi/c/private/ppp_find_private.h
+new file mode 100644
+index 0000000000000..00b26de62bd90
+--- /dev/null
++++ b/ppapi/c/private/ppp_find_private.h
+@@ -0,0 +1,58 @@
++/* Copyright 2014 The Chromium Authors. All rights reserved.
++ * Use of this source code is governed by a BSD-style license that can be
++ * found in the LICENSE file.
++ */
++
++/* From private/ppp_find_private.idl modified Thu Mar 20 11:34:17 2014. */
++
++#ifndef PPAPI_C_PRIVATE_PPP_FIND_PRIVATE_H_
++#define PPAPI_C_PRIVATE_PPP_FIND_PRIVATE_H_
++
++#include "ppapi/c/pp_bool.h"
++#include "ppapi/c/pp_instance.h"
++#include "ppapi/c/pp_macros.h"
++#include "ppapi/c/pp_stdint.h"
++
++#define PPP_FIND_PRIVATE_INTERFACE_0_3 "PPP_Find_Private;0.3"
++#define PPP_FIND_PRIVATE_INTERFACE PPP_FIND_PRIVATE_INTERFACE_0_3
++
++/**
++ * @file
++ */
++
++
++/**
++ * @addtogroup Interfaces
++ * @{
++ */
++struct PPP_Find_Private_0_3 {
++  /**
++   * Finds the given UTF-8 text starting at the current selection. The number of
++   * results will be updated asynchronously via NumberOfFindResultsChanged in
++   * PPB_Find. Note that multiple StartFind calls can happen before StopFind is
++   * called in the case of the search term changing.
++   *
++   * Return PP_FALSE if the plugin doesn't support find in page. Consequently,
++   * it won't call any callbacks.
++   */
++  PP_Bool (*StartFind)(PP_Instance instance,
++                       const char* text,
++                       PP_Bool case_sensitive);
++  /**
++   * Go to the next/previous result.
++   */
++  void (*SelectFindResult)(PP_Instance instance, PP_Bool forward);
++  /**
++   * Tells the plugin that the find operation has stopped, so it should clear
++   * any highlighting.
++   */
++  void (*StopFind)(PP_Instance instance);
++};
++
++typedef struct PPP_Find_Private_0_3 PPP_Find_Private;
++/**
++ * @}
++ */
++
++#endif  /* PPAPI_C_PRIVATE_PPP_FIND_PRIVATE_H_ */
++
+diff --git a/ppapi/cpp/BUILD.gn b/ppapi/cpp/BUILD.gn
+index 975feff1d12cf..8f0bbcab03b78 100644
+--- a/ppapi/cpp/BUILD.gn
++++ b/ppapi/cpp/BUILD.gn
+@@ -203,6 +203,8 @@ source_set("objects") {
+     "private/ext_crx_file_system_private.h",
+     "private/file_io_private.cc",
+     "private/file_io_private.h",
++    "private/find_private.cc",
++    "private/find_private.h",
+     "private/flash_font_file.cc",
+     "private/flash_font_file.h",
+     "private/host_resolver_private.cc",
+diff --git a/ppapi/cpp/private/find_private.cc b/ppapi/cpp/private/find_private.cc
+new file mode 100644
+index 0000000000000..97a02bc1a78e2
+--- /dev/null
++++ b/ppapi/cpp/private/find_private.cc
+@@ -0,0 +1,104 @@
++// Copyright 2014 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "ppapi/cpp/private/find_private.h"
++
++#include "ppapi/c/private/ppb_find_private.h"
++#include "ppapi/cpp/instance.h"
++#include "ppapi/cpp/module.h"
++#include "ppapi/cpp/module_impl.h"
++#include "ppapi/cpp/rect.h"
++
++namespace pp {
++
++namespace {
++
++template <> const char* interface_name<PPB_Find_Private>() {
++  return PPB_FIND_PRIVATE_INTERFACE;
++}
++
++static const char kPPPFindInterface[] = PPP_FIND_PRIVATE_INTERFACE;
++
++PP_Bool StartFind(PP_Instance instance,
++                  const char* text,
++                  PP_Bool case_sensitive) {
++  void* object = Instance::GetPerInstanceObject(instance, kPPPFindInterface);
++  if (!object)
++    return PP_FALSE;
++  if (!text || text[0] == '\0') {
++    PP_NOTREACHED();
++    return PP_FALSE;
++  }
++  bool return_value = static_cast<Find_Private*>(object)->StartFind(
++      text, PP_ToBool(case_sensitive));
++  return PP_FromBool(return_value);
++}
++
++void SelectFindResult(PP_Instance instance, PP_Bool forward) {
++  void* object = Instance::GetPerInstanceObject(instance, kPPPFindInterface);
++  if (object)
++    static_cast<Find_Private*>(object)->SelectFindResult(PP_ToBool(forward));
++}
++
++void StopFind(PP_Instance instance) {
++  void* object = Instance::GetPerInstanceObject(instance, kPPPFindInterface);
++  if (object)
++    static_cast<Find_Private*>(object)->StopFind();
++}
++
++const PPP_Find_Private ppp_find = {
++  &StartFind,
++  &SelectFindResult,
++  &StopFind
++};
++
++}  // namespace
++
++Find_Private::Find_Private(Instance* instance)
++      : associated_instance_(instance) {
++  Module::Get()->AddPluginInterface(kPPPFindInterface, &ppp_find);
++  instance->AddPerInstanceObject(kPPPFindInterface, this);
++}
++
++Find_Private::~Find_Private() {
++  Instance::RemovePerInstanceObject(associated_instance_,
++                                    kPPPFindInterface, this);
++}
++
++void Find_Private::SetPluginToHandleFindRequests() {
++  if (has_interface<PPB_Find_Private>()) {
++    get_interface<PPB_Find_Private>()->SetPluginToHandleFindRequests(
++        associated_instance_.pp_instance());
++  }
++}
++
++void Find_Private::NumberOfFindResultsChanged(int32_t total,
++                                              bool final_result) {
++  if (has_interface<PPB_Find_Private>()) {
++    get_interface<PPB_Find_Private>()->NumberOfFindResultsChanged(
++        associated_instance_.pp_instance(), total, PP_FromBool(final_result));
++  }
++}
++
++void Find_Private::SelectedFindResultChanged(int32_t index,
++                                              bool final_result) {
++  if (has_interface<PPB_Find_Private>()) {
++    get_interface<PPB_Find_Private>()->SelectedFindResultChanged(
++        associated_instance_.pp_instance(), index, final_result);
++  }
++}
++
++void Find_Private::SetTickmarks(const std::vector<pp::Rect>& tickmarks) {
++  if (has_interface<PPB_Find_Private>()) {
++    std::vector<PP_Rect> tickmarks_converted(tickmarks.begin(),
++                                             tickmarks.end());
++    PP_Rect* array =
++        tickmarks_converted.empty() ? NULL : &tickmarks_converted[0];
++    get_interface<PPB_Find_Private>()->SetTickmarks(
++        associated_instance_.pp_instance(), array,
++        static_cast<uint32_t>(tickmarks.size()));
++  }
++}
++
++}  // namespace pp
+diff --git a/ppapi/cpp/private/find_private.h b/ppapi/cpp/private/find_private.h
+new file mode 100644
+index 0000000000000..897cd75eab81e
+--- /dev/null
++++ b/ppapi/cpp/private/find_private.h
+@@ -0,0 +1,68 @@
++// Copyright 2014 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef PPAPI_CPP_PRIVATE_FIND_PRIVATE_H_
++#define PPAPI_CPP_PRIVATE_FIND_PRIVATE_H_
++
++#include <stdint.h>
++
++#include <string>
++#include <vector>
++
++#include "ppapi/c/private/ppp_find_private.h"
++#include "ppapi/cpp/instance_handle.h"
++
++namespace pp {
++
++class Instance;
++class Rect;
++
++// This class allows you to associate the PPP_Find and PPB_Find C-based
++// interfaces with an object. It associates itself with the given instance, and
++// registers as the global handler for handling the PPP_Find interface that the
++// browser calls.
++//
++// You would typically use this either via inheritance on your instance:
++//   class MyInstance : public pp::Instance, public pp::Find_Private {
++//     class MyInstance() : pp::Find_Private(this) {
++//     }
++//     ...
++//   };
++//
++// or by composition:
++//   class MyFinder : public pp::Find {
++//     ...
++//   };
++//
++//   class MyInstance : public pp::Instance {
++//     MyInstance() : finder_(this) {
++//     }
++//
++//     MyFinder finder_;
++//   };
++class Find_Private {
++ public:
++  // The instance parameter must outlive this class.
++  Find_Private(Instance* instance);
++  virtual ~Find_Private();
++
++  // PPP_Find_Private functions exposed as virtual functions for you to
++  // override.
++  virtual bool StartFind(const std::string& text, bool case_sensitive) = 0;
++  virtual void SelectFindResult(bool forward) = 0;
++  virtual void StopFind() = 0;
++
++  // PPB_Find_Private functions for you to call to report find results.
++  void SetPluginToHandleFindRequests();
++  void NumberOfFindResultsChanged(int32_t total, bool final_result);
++  void SelectedFindResultChanged(int32_t index, bool final_result);
++  void SetTickmarks(const std::vector<pp::Rect>& tickmarks);
++
++ private:
++  InstanceHandle associated_instance_;
++};
++
++}  // namespace pp
++
++#endif  // PPAPI_CPP_PRIVATE_FIND_PRIVATE_H_
+diff --git a/ppapi/proxy/BUILD.gn b/ppapi/proxy/BUILD.gn
+index 8c6329caae7b0..62ca8ca3f1c2f 100644
+--- a/ppapi/proxy/BUILD.gn
++++ b/ppapi/proxy/BUILD.gn
+@@ -100,6 +100,8 @@ component("proxy") {
+     "ppb_testing_proxy.h",
+     "ppp_class_proxy.cc",
+     "ppp_class_proxy.h",
++    "ppp_find_proxy.cc",
++    "ppp_find_proxy.h",
+     "ppp_graphics_3d_proxy.cc",
+     "ppp_graphics_3d_proxy.h",
+     "ppp_input_event_proxy.cc",
+diff --git a/ppapi/proxy/interface_list.cc b/ppapi/proxy/interface_list.cc
+index c401a1c6b94aa..9639f915e334b 100644
+--- a/ppapi/proxy/interface_list.cc
++++ b/ppapi/proxy/interface_list.cc
+@@ -76,6 +76,7 @@
+ #include "ppapi/c/private/ppb_ext_crx_file_system_private.h"
+ #include "ppapi/c/private/ppb_file_io_private.h"
+ #include "ppapi/c/private/ppb_file_ref_private.h"
++#include "ppapi/c/private/ppb_find_private.h"
+ #include "ppapi/c/private/ppb_flash_font_file.h"
+ #include "ppapi/c/private/ppb_host_resolver_private.h"
+ #include "ppapi/c/private/ppb_isolated_file_system_private.h"
+@@ -106,6 +107,7 @@
+ #include "ppapi/proxy/ppb_video_decoder_proxy.h"
+ #include "ppapi/proxy/ppb_x509_certificate_private_proxy.h"
+ #include "ppapi/proxy/ppp_class_proxy.h"
++#include "ppapi/proxy/ppp_find_proxy.h"
+ #include "ppapi/proxy/ppp_graphics_3d_proxy.h"
+ #include "ppapi/proxy/ppp_input_event_proxy.h"
+ #include "ppapi/proxy/ppp_instance_private_proxy.h"
+@@ -288,6 +290,8 @@ InterfaceList::InterfaceList() {
+ #if !BUILDFLAG(IS_NACL)
+   AddProxy(API_ID_PPP_PDF, &ProxyFactory<PPP_Pdf_Proxy>);
+   AddPPP(PPP_PDF_INTERFACE, PPP_Pdf_Proxy::GetProxyInterface());
++  AddProxy(API_ID_PPP_FIND_PRIVATE, &ProxyFactory<PPP_Find_Proxy>);
++  AddPPP(PPP_FIND_PRIVATE_INTERFACE, PPP_Find_Proxy::GetProxyInterface());
+   AddProxy(API_ID_PPP_VIDEO_DECODER_DEV, &ProxyFactory<PPP_VideoDecoder_Proxy>);
+   AddPPP(PPP_VIDEODECODER_DEV_INTERFACE,
+          PPP_VideoDecoder_Proxy::GetProxyInterface());
+diff --git a/ppapi/proxy/ppapi_messages.h b/ppapi/proxy/ppapi_messages.h
+index 2915f3273442d..188227e8d5029 100644
+--- a/ppapi/proxy/ppapi_messages.h
++++ b/ppapi/proxy/ppapi_messages.h
+@@ -812,6 +812,30 @@ IPC_SYNC_MESSAGE_ROUTED3_1(PpapiMsg_PPPPdf_PrintBegin,
+                            PP_PdfPrintSettings_Dev /* pdf_print_settings */,
+                            int32_t /* result */)
+ 
++// Find
++IPC_MESSAGE_ROUTED2(PpapiPluginMsg_PPPFind_StartFind,
++                    PP_Instance /* instance */,
++                    std::string /* text */)
++IPC_MESSAGE_ROUTED2(PpapiPluginMsg_PPPFind_SelectFindResult,
++                    PP_Instance /* instance */,
++                    PP_Bool /* forward */)
++IPC_MESSAGE_ROUTED1(PpapiPluginMsg_PPPFind_StopFind,
++                    PP_Instance /* instance */)
++
++IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBInstance_SetPluginToHandleFindRequests,
++                    PP_Instance /* instance */)
++IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_NumberOfFindResultsChanged,
++                    PP_Instance /* instance */,
++                    int32_t /* total */,
++                    PP_Bool /* final_result */)
++IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBInstance_SelectFindResultChanged,
++                    PP_Instance /* instance */,
++                    int32_t /* index */,
++                    PP_Bool /* final_result */)
++IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBInstance_SetTickmarks,
++                    PP_Instance /* instance */,
++                    std::vector<PP_Rect> /* tickmarks */)
++
+ // PPP_Printing
+ IPC_SYNC_MESSAGE_ROUTED1_1(PpapiMsg_PPPPrinting_QuerySupportedFormats,
+                            PP_Instance /* instance */,
+diff --git a/ppapi/proxy/ppb_instance_proxy.cc b/ppapi/proxy/ppb_instance_proxy.cc
+index 1d8882caebc02..bbd10a244a62f 100644
+--- a/ppapi/proxy/ppb_instance_proxy.cc
++++ b/ppapi/proxy/ppb_instance_proxy.cc
+@@ -125,6 +125,14 @@ bool PPB_Instance_Proxy::OnMessageReceived(const IPC::Message& msg) {
+                         OnHostMsgExecuteScript)
+     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBInstance_GetDefaultCharSet,
+                         OnHostMsgGetDefaultCharSet)
++    IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBInstance_SetPluginToHandleFindRequests,
++                        OnHostMsgSetPluginToHandleFindRequests);
++    IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBInstance_NumberOfFindResultsChanged,
++                        OnHostMsgNumberOfFindResultsChanged)
++    IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBInstance_SelectFindResultChanged,
++                        OnHostMsgSelectFindResultChanged)
++    IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBInstance_SetTickmarks,
++                        OnHostMsgSetTickmarks)
+     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBInstance_PostMessage,
+                         OnHostMsgPostMessage)
+     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBInstance_SetFullscreen,
+@@ -270,6 +278,33 @@ PP_Var PPB_Instance_Proxy::GetDefaultCharSet(PP_Instance instance) {
+   return result.Return(dispatcher);
+ }
+ 
++void PPB_Instance_Proxy::SetPluginToHandleFindRequests(PP_Instance instance) {
++  dispatcher()->Send(new PpapiHostMsg_PPBInstance_SetPluginToHandleFindRequests(
++      API_ID_PPB_INSTANCE, instance));
++}
++
++void PPB_Instance_Proxy::NumberOfFindResultsChanged(PP_Instance instance,
++                                                    int32_t total,
++                                                    PP_Bool final_result) {
++  dispatcher()->Send(new PpapiHostMsg_PPBInstance_NumberOfFindResultsChanged(
++      API_ID_PPB_INSTANCE, instance, total, final_result));
++}
++
++void PPB_Instance_Proxy::SelectedFindResultChanged(PP_Instance instance,
++                                                   int32_t index,
++                                                   PP_Bool final_result) {
++  dispatcher()->Send(new PpapiHostMsg_PPBInstance_SelectFindResultChanged(
++      API_ID_PPB_INSTANCE, instance, index, final_result));
++}
++
++void PPB_Instance_Proxy::SetTickmarks(PP_Instance instance,
++                                      const PP_Rect* tickmarks,
++                                      uint32_t count) {
++  dispatcher()->Send(new PpapiHostMsg_PPBInstance_SetTickmarks(
++      API_ID_PPB_INSTANCE, instance,
++      std::vector<PP_Rect>(tickmarks, tickmarks + count)));
++}
++
+ PP_Bool PPB_Instance_Proxy::IsFullscreen(PP_Instance instance) {
+   InstanceData* data = static_cast<PluginDispatcher*>(dispatcher())->
+       GetInstanceData(instance);
+@@ -669,6 +703,53 @@ void PPB_Instance_Proxy::OnHostMsgGetDefaultCharSet(
+     result.Return(dispatcher(), enter.functions()->GetDefaultCharSet(instance));
+ }
+ 
++void PPB_Instance_Proxy::OnHostMsgSetPluginToHandleFindRequests(
++    PP_Instance instance) {
++  if (!dispatcher()->permissions().HasPermission(PERMISSION_PDF))
++    return;
++  EnterInstanceNoLock enter(instance);
++  if (enter.succeeded())
++    enter.functions()->SetPluginToHandleFindRequests(instance);
++}
++
++void PPB_Instance_Proxy::OnHostMsgNumberOfFindResultsChanged(
++    PP_Instance instance,
++    int32_t total,
++    PP_Bool final_result) {
++  if (!dispatcher()->permissions().HasPermission(PERMISSION_PDF))
++    return;
++  EnterInstanceNoLock enter(instance);
++  if (enter.succeeded()) {
++    enter.functions()->NumberOfFindResultsChanged(
++        instance, total, final_result);
++  }
++}
++
++void PPB_Instance_Proxy::OnHostMsgSelectFindResultChanged(
++    PP_Instance instance,
++    int32_t index,
++    PP_Bool final_result) {
++  if (!dispatcher()->permissions().HasPermission(PERMISSION_PDF))
++    return;
++  EnterInstanceNoLock enter(instance);
++  if (enter.succeeded())
++    enter.functions()->SelectedFindResultChanged(instance, index, final_result);
++}
++
++void PPB_Instance_Proxy::OnHostMsgSetTickmarks(
++    PP_Instance instance,
++    const std::vector<PP_Rect>& tickmarks) {
++  if (!dispatcher()->permissions().HasPermission(PERMISSION_PDF))
++    return;
++  const PP_Rect* array = tickmarks.empty() ? NULL : &tickmarks[0];
++  EnterInstanceNoLock enter(instance);
++  if (enter.succeeded()) {
++    enter.functions()->SetTickmarks(instance,
++                                    array,
++                                    static_cast<uint32_t>(tickmarks.size()));
++  }
++}
++
+ void PPB_Instance_Proxy::OnHostMsgSetFullscreen(PP_Instance instance,
+                                                 PP_Bool fullscreen,
+                                                 PP_Bool* result) {
+diff --git a/ppapi/proxy/ppb_instance_proxy.h b/ppapi/proxy/ppb_instance_proxy.h
+index d0745d90a56b2..975eeb664b811 100644
+--- a/ppapi/proxy/ppb_instance_proxy.h
++++ b/ppapi/proxy/ppb_instance_proxy.h
+@@ -55,6 +55,14 @@ class PPB_Instance_Proxy : public InterfaceProxy,
+   uint32_t GetAudioHardwareOutputSampleRate(PP_Instance instance) override;
+   uint32_t GetAudioHardwareOutputBufferSize(PP_Instance instance) override;
+   PP_Var GetDefaultCharSet(PP_Instance instance) override;
++  void SetPluginToHandleFindRequests(PP_Instance instance) override;
++  void NumberOfFindResultsChanged(PP_Instance instance,
++                                  int32_t total,
++                                  PP_Bool final_result) override;
++  void SelectedFindResultChanged(PP_Instance instance, int32_t index, PP_Bool final_result) override;
++  void SetTickmarks(PP_Instance instance,
++                    const PP_Rect* tickmarks,
++                    uint32_t count) override;
+   PP_Bool IsFullscreen(PP_Instance instance) override;
+   PP_Bool SetFullscreen(PP_Instance instance, PP_Bool fullscreen) override;
+   PP_Bool GetScreenSize(PP_Instance instance, PP_Size* size) override;
+@@ -125,6 +133,15 @@ class PPB_Instance_Proxy : public InterfaceProxy,
+                                                  uint32_t *result);
+   void OnHostMsgGetDefaultCharSet(PP_Instance instance,
+                                   SerializedVarReturnValue result);
++  void OnHostMsgSetPluginToHandleFindRequests(PP_Instance instance);
++  void OnHostMsgNumberOfFindResultsChanged(PP_Instance instance,
++                                           int32_t total,
++                                           PP_Bool final_result);
++  void OnHostMsgSelectFindResultChanged(PP_Instance instance,
++                                        int32_t index,
++                                           PP_Bool final_result);
++  void OnHostMsgSetTickmarks(PP_Instance instance,
++                             const std::vector<PP_Rect>& tickmarks);
+   void OnHostMsgSetFullscreen(PP_Instance instance,
+                               PP_Bool fullscreen,
+                               PP_Bool* result);
+diff --git a/ppapi/proxy/ppp_find_proxy.cc b/ppapi/proxy/ppp_find_proxy.cc
+new file mode 100644
+index 0000000000000..62dee569c127a
+--- /dev/null
++++ b/ppapi/proxy/ppp_find_proxy.cc
+@@ -0,0 +1,104 @@
++// Copyright 2014 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "ppapi/proxy/ppp_find_proxy.h"
++
++#include "build/build_config.h"
++#include "ppapi/proxy/host_dispatcher.h"
++#include "ppapi/proxy/ppapi_messages.h"
++#include "ppapi/shared_impl/api_id.h"
++#include "ppapi/shared_impl/proxy_lock.h"
++
++namespace ppapi {
++namespace proxy {
++
++namespace {
++
++#if !BUILDFLAG(IS_NACL)
++PP_Bool StartFind(PP_Instance instance,
++                  const char* text,
++                  PP_Bool case_sensitive) {
++  DCHECK(case_sensitive == PP_FALSE);
++  HostDispatcher::GetForInstance(instance)->Send(
++      new PpapiPluginMsg_PPPFind_StartFind(API_ID_PPP_FIND_PRIVATE,
++                                           instance,
++                                           text));
++  return PP_TRUE;
++}
++
++void SelectFindResult(PP_Instance instance,
++                      PP_Bool forward) {
++  HostDispatcher::GetForInstance(instance)->Send(
++      new PpapiPluginMsg_PPPFind_SelectFindResult(API_ID_PPP_FIND_PRIVATE,
++                                                  instance, forward));
++}
++
++void StopFind(PP_Instance instance) {
++  HostDispatcher::GetForInstance(instance)->Send(
++      new PpapiPluginMsg_PPPFind_StopFind(API_ID_PPP_FIND_PRIVATE, instance));
++}
++
++const PPP_Find_Private ppp_find_interface = {
++  &StartFind,
++  &SelectFindResult,
++  &StopFind
++};
++#else
++// The NaCl plugin doesn't need the host side interface - stub it out.
++const PPP_Find_Private ppp_find_interface = {};
++#endif
++
++}  // namespace
++
++PPP_Find_Proxy::PPP_Find_Proxy(Dispatcher* dispatcher)
++    : InterfaceProxy(dispatcher),
++      ppp_find_(NULL) {
++  if (dispatcher->IsPlugin()) {
++    ppp_find_ = static_cast<const PPP_Find_Private*>(
++        dispatcher->local_get_interface()(PPP_FIND_PRIVATE_INTERFACE));
++  }
++}
++
++PPP_Find_Proxy::~PPP_Find_Proxy() {
++}
++
++// static
++const PPP_Find_Private* PPP_Find_Proxy::GetProxyInterface() {
++  return &ppp_find_interface;
++}
++
++bool PPP_Find_Proxy::OnMessageReceived(const IPC::Message& msg) {
++  if (!dispatcher()->IsPlugin())
++    return false;
++
++  bool handled = true;
++  IPC_BEGIN_MESSAGE_MAP(PPP_Find_Proxy, msg)
++    IPC_MESSAGE_HANDLER(PpapiPluginMsg_PPPFind_StartFind, OnPluginMsgStartFind)
++    IPC_MESSAGE_HANDLER(PpapiPluginMsg_PPPFind_SelectFindResult,
++                        OnPluginMsgSelectFindResult)
++    IPC_MESSAGE_HANDLER(PpapiPluginMsg_PPPFind_StopFind, OnPluginMsgStopFind)
++    IPC_MESSAGE_UNHANDLED(handled = false)
++  IPC_END_MESSAGE_MAP()
++  return handled;
++}
++
++void PPP_Find_Proxy::OnPluginMsgStartFind(PP_Instance instance,
++                                          const std::string& text) {
++  if (ppp_find_)
++    CallWhileUnlocked(ppp_find_->StartFind, instance, text.c_str(), PP_FALSE);
++}
++
++void PPP_Find_Proxy::OnPluginMsgSelectFindResult(PP_Instance instance,
++                                                 PP_Bool forward) {
++  if (ppp_find_)
++    CallWhileUnlocked(ppp_find_->SelectFindResult, instance, forward);
++}
++
++void PPP_Find_Proxy::OnPluginMsgStopFind(PP_Instance instance) {
++  if (ppp_find_)
++    CallWhileUnlocked(ppp_find_->StopFind, instance);
++}
++
++}  // namespace proxy
++}  // namespace ppapi
+diff --git a/ppapi/proxy/ppp_find_proxy.h b/ppapi/proxy/ppp_find_proxy.h
+new file mode 100644
+index 0000000000000..a55a11413fe31
+--- /dev/null
++++ b/ppapi/proxy/ppp_find_proxy.h
+@@ -0,0 +1,48 @@
++// Copyright 2014 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef PPAPI_PROXY_PPP_FIND_PROXY_H_
++#define PPAPI_PROXY_PPP_FIND_PROXY_H_
++
++#include <string>
++
++#include "ppapi/c/private/ppp_find_private.h"
++#include "ppapi/proxy/interface_proxy.h"
++
++namespace ppapi {
++
++namespace proxy {
++
++class PPP_Find_Proxy : public InterfaceProxy {
++ public:
++  explicit PPP_Find_Proxy(Dispatcher* dispatcher);
++
++  PPP_Find_Proxy(const PPP_Find_Proxy&) = delete;
++  PPP_Find_Proxy& operator=(const PPP_Find_Proxy&) = delete;
++
++  ~PPP_Find_Proxy() override;
++
++  static const PPP_Find_Private* GetProxyInterface();
++
++  // InterfaceProxy implementation.
++  bool OnMessageReceived(const IPC::Message& msg) override;
++
++ private:
++  // Message handlers.
++  void OnPluginMsgStartFind(PP_Instance instance,
++                            const std::string& text);
++  void OnPluginMsgSelectFindResult(PP_Instance instance,
++                                   PP_Bool forward);
++  void OnPluginMsgStopFind(PP_Instance instance);
++
++  // When this proxy is in the plugin side, this value caches the interface
++  // pointer so we don't have to retrieve it from the dispatcher each time.
++  // In the host, this value is always NULL.
++  const PPP_Find_Private* ppp_find_;
++};
++
++}  // namespace proxy
++}  // namespace ppapi
++
++#endif  // PPAPI_PROXY_PPP_FIND_PROXY_H_
+diff --git a/ppapi/tests/all_c_includes.h b/ppapi/tests/all_c_includes.h
+index 71e8a000d07ce..39e5cf3658257 100644
+--- a/ppapi/tests/all_c_includes.h
++++ b/ppapi/tests/all_c_includes.h
+@@ -99,6 +99,7 @@
+ #include "ppapi/c/private/ppb_display_color_profile_private.h"
+ #include "ppapi/c/private/ppb_ext_crx_file_system_private.h"
+ #include "ppapi/c/private/ppb_file_io_private.h"
++#include "ppapi/c/private/ppb_find_private.h"
+ #include "ppapi/c/private/ppb_flash_font_file.h"
+ #include "ppapi/c/private/ppb_host_resolver_private.h"
+ #include "ppapi/c/private/ppb_instance_private.h"
+@@ -110,6 +111,7 @@
+ #include "ppapi/c/private/ppb_udp_socket_private.h"
+ #include "ppapi/c/private/ppb_uma_private.h"
+ #include "ppapi/c/private/ppb_x509_certificate_private.h"
++#include "ppapi/c/private/ppp_find_private.h"
+ #include "ppapi/c/private/ppp_instance_private.h"
+ #include "ppapi/c/trusted/ppb_url_loader_trusted.h"
+ 
+diff --git a/ppapi/tests/all_cpp_includes.h b/ppapi/tests/all_cpp_includes.h
+index 9f6364d72566a..13741a7708beb 100644
+--- a/ppapi/tests/all_cpp_includes.h
++++ b/ppapi/tests/all_cpp_includes.h
+@@ -46,6 +46,7 @@
+ #include "ppapi/cpp/point.h"
+ #include "ppapi/cpp/private/camera_capabilities_private.h"
+ #include "ppapi/cpp/private/camera_device_private.h"
++#include "ppapi/cpp/private/find_private.h"
+ #include "ppapi/cpp/private/flash_font_file.h"
+ #include "ppapi/cpp/private/instance_private.h"
+ #include "ppapi/cpp/private/net_address_private.h"
+diff --git a/ppapi/thunk/BUILD.gn b/ppapi/thunk/BUILD.gn
+index 2228cf3cdc77a..e1f14c2d1e683 100644
+--- a/ppapi/thunk/BUILD.gn
++++ b/ppapi/thunk/BUILD.gn
+@@ -71,6 +71,7 @@ source_set("thunk") {
+     "ppb_file_ref_thunk.cc",
+     "ppb_file_system_api.h",
+     "ppb_file_system_thunk.cc",
++    "ppb_find_private_thunk.cc",
+     "ppb_flash_font_file_api.h",
+     "ppb_fullscreen_thunk.cc",
+     "ppb_gamepad_api.h",
+diff --git a/ppapi/thunk/interfaces_ppb_private_pdf.h b/ppapi/thunk/interfaces_ppb_private_pdf.h
+index 008e31028193c..efe5645514333 100644
+--- a/ppapi/thunk/interfaces_ppb_private_pdf.h
++++ b/ppapi/thunk/interfaces_ppb_private_pdf.h
+@@ -14,6 +14,7 @@
+ 
+ #if !BUILDFLAG(IS_NACL)
+ PROXIED_IFACE(PPB_PDF_INTERFACE, PPB_PDF)
++PROXIED_IFACE(PPB_FIND_PRIVATE_INTERFACE_0_3, PPB_Find_Private_0_3)
+ #endif  // !BUILDFLAG(IS_NACL)
+ 
+ #include "ppapi/thunk/interfaces_postamble.h"
+diff --git a/ppapi/thunk/ppb_find_private_thunk.cc b/ppapi/thunk/ppb_find_private_thunk.cc
+new file mode 100644
+index 0000000000000..e0ceee9b404ce
+--- /dev/null
++++ b/ppapi/thunk/ppb_find_private_thunk.cc
+@@ -0,0 +1,68 @@
++// Copyright 2014 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++// From private/ppb_find_private.idl modified Wed Jan 27 17:10:16 2016.
++
++#include <stdint.h>
++
++#include "base/logging.h"
++#include "ppapi/c/pp_errors.h"
++#include "ppapi/c/private/ppb_find_private.h"
++#include "ppapi/shared_impl/tracked_callback.h"
++#include "ppapi/thunk/enter.h"
++#include "ppapi/thunk/ppapi_thunk_export.h"
++
++namespace ppapi {
++namespace thunk {
++
++namespace {
++
++void SetPluginToHandleFindRequests(PP_Instance instance) {
++  VLOG(4) << "PPB_Find_Private::SetPluginToHandleFindRequests()";
++  EnterInstance enter(instance);
++  if (enter.failed())
++    return;
++  enter.functions()->SetPluginToHandleFindRequests(instance);
++}
++
++void NumberOfFindResultsChanged(PP_Instance instance,
++                                int32_t total,
++                                PP_Bool final_result) {
++  VLOG(4) << "PPB_Find_Private::NumberOfFindResultsChanged()";
++  EnterInstance enter(instance);
++  if (enter.failed())
++    return;
++  enter.functions()->NumberOfFindResultsChanged(instance, total, final_result);
++}
++
++void SelectedFindResultChanged(PP_Instance instance, int32_t index, PP_Bool final_result) {
++  VLOG(4) << "PPB_Find_Private::SelectedFindResultChanged()";
++  EnterInstance enter(instance);
++  if (enter.failed())
++    return;
++  enter.functions()->SelectedFindResultChanged(instance, index, final_result);
++}
++
++void SetTickmarks(PP_Instance instance,
++                  const struct PP_Rect tickmarks[],
++                  uint32_t count) {
++  VLOG(4) << "PPB_Find_Private::SetTickmarks()";
++  EnterInstance enter(instance);
++  if (enter.failed())
++    return;
++  enter.functions()->SetTickmarks(instance, tickmarks, count);
++}
++
++const PPB_Find_Private_0_3 g_ppb_find_private_thunk_0_3 = {
++    &SetPluginToHandleFindRequests, &NumberOfFindResultsChanged,
++    &SelectedFindResultChanged, &SetTickmarks};
++
++}  // namespace
++
++PPAPI_THUNK_EXPORT const PPB_Find_Private_0_3* GetPPB_Find_Private_0_3_Thunk() {
++  return &g_ppb_find_private_thunk_0_3;
++}
++
++}  // namespace thunk
++}  // namespace ppapi
+diff --git a/ppapi/thunk/ppb_instance_api.h b/ppapi/thunk/ppb_instance_api.h
+index 58e9750e665ab..794943571db50 100644
+--- a/ppapi/thunk/ppb_instance_api.h
++++ b/ppapi/thunk/ppb_instance_api.h
+@@ -73,6 +73,18 @@ class PPB_Instance_API {
+                              PP_Var source,
+                              PP_Var value) = 0;
+ 
++  // Find.
++  virtual void SetPluginToHandleFindRequests(PP_Instance instance) = 0;
++  virtual void NumberOfFindResultsChanged(PP_Instance instance,
++                                          int32_t total,
++                                          PP_Bool final_result) = 0;
++  virtual void SelectedFindResultChanged(PP_Instance instance,
++                                         int32_t index,
++                                          PP_Bool final_result) = 0;
++  virtual void SetTickmarks(PP_Instance instance,
++                            const PP_Rect* tickmarks,
++                            uint32_t count) = 0;
++
+   // Fullscreen.
+   virtual PP_Bool IsFullscreen(PP_Instance instance) = 0;
+   virtual PP_Bool SetFullscreen(PP_Instance instance,

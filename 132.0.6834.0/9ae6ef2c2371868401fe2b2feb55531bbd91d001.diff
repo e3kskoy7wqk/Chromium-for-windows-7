@@ -1,0 +1,55 @@
+diff --git a/content/public/renderer/render_frame.h b/content/public/renderer/render_frame.h
+index f49ce6c83a380..a7426fc581a6f 100644
+--- a/content/public/renderer/render_frame.h
++++ b/content/public/renderer/render_frame.h
+@@ -202,6 +202,13 @@ class CONTENT_EXPORT RenderFrame : public IPC::Listener,
+   virtual blink::AssociatedInterfaceProvider*
+   GetRemoteAssociatedInterfaces() = 0;
+ 
++#if BUILDFLAG(ENABLE_PPAPI)
++  // Used by plugins that load data in this RenderFrame to update the loading
++  // notifications.
++  virtual void PluginDidStartLoading() = 0;
++  virtual void PluginDidStopLoading() = 0;
++#endif
++
+   // Notifies the browser of text selection changes made.
+   virtual void SetSelectedText(const std::u16string& selection_text,
+                                size_t offset,
+diff --git a/content/renderer/render_frame_impl.cc b/content/renderer/render_frame_impl.cc
+index d70f6df69aa60..5a36eb6eed317 100644
+--- a/content/renderer/render_frame_impl.cc
++++ b/content/renderer/render_frame_impl.cc
+@@ -2379,6 +2379,17 @@ RenderFrameImpl::GetRemoteAssociatedInterfaces() {
+   return remote_associated_interfaces_.get();
+ }
+ 
++#if BUILDFLAG(ENABLE_PPAPI)
++
++void RenderFrameImpl::PluginDidStartLoading() {
++  DidStartLoading();
++}
++
++void RenderFrameImpl::PluginDidStopLoading() {
++  DidStopLoading();
++}
++#endif  // BUILDFLAG(ENABLE_PPAPI)
++
+ void RenderFrameImpl::SetSelectedText(const std::u16string& selection_text,
+                                       size_t offset,
+                                       const gfx::Range& range) {
+diff --git a/content/renderer/render_frame_impl.h b/content/renderer/render_frame_impl.h
+index ebea3f5fc2d3f..06fd7fd8c1afd 100644
+--- a/content/renderer/render_frame_impl.h
++++ b/content/renderer/render_frame_impl.h
+@@ -361,6 +361,10 @@ class CONTENT_EXPORT RenderFrameImpl
+       mojo::ScopedMessagePipeHandle interface_pipe) override;
+   blink::AssociatedInterfaceRegistry* GetAssociatedInterfaceRegistry() override;
+   blink::AssociatedInterfaceProvider* GetRemoteAssociatedInterfaces() override;
++#if BUILDFLAG(ENABLE_PPAPI)
++  void PluginDidStartLoading() override;
++  void PluginDidStopLoading() override;
++#endif
+   void SetSelectedText(const std::u16string& selection_text,
+                        size_t offset,
+                        const gfx::Range& range) override;

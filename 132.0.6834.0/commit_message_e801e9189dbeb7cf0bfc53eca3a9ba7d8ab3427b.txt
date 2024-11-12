@@ -1,0 +1,1 @@
+Remove AddAllowedRequestInitiatorForPlugin() and related code.    2022-03-17 07:24:01    e801e9189dbeb7cf0bfc53eca3a9ba7d8ab3427b

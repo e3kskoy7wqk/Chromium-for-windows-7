@@ -1,0 +1,1031 @@
+diff --git a/chrome/renderer/BUILD.gn b/chrome/renderer/BUILD.gn
+index 481936d522f8d..b3de28a218d3c 100644
+--- a/chrome/renderer/BUILD.gn
++++ b/chrome/renderer/BUILD.gn
+@@ -333,6 +333,12 @@ static_library("renderer") {
+       "printing/chrome_print_render_frame_helper_delegate.cc",
+       "printing/chrome_print_render_frame_helper_delegate.h",
+     ]
++    if (enable_print_preview && enable_plugins) {
++      sources += [
++        "pepper/chrome_pdf_print_client.cc",
++        "pepper/chrome_pdf_print_client.h",
++      ]
++    }
+   }
+ 
+   if (enable_paint_preview) {
+diff --git a/chrome/renderer/chrome_content_renderer_client.cc b/chrome/renderer/chrome_content_renderer_client.cc
+index b388532e1637f..8019bf9fa78ba 100644
+--- a/chrome/renderer/chrome_content_renderer_client.cc
++++ b/chrome/renderer/chrome_content_renderer_client.cc
+@@ -219,6 +219,11 @@
+ #include "printing/metafile_agent.h"  // nogncheck
+ #endif
+ 
++#if BUILDFLAG(ENABLE_PRINT_PREVIEW) && BUILDFLAG(ENABLE_PLUGINS)
++#include "chrome/renderer/pepper/chrome_pdf_print_client.h"
++#include "components/pdf/renderer/pepper_pdf_host.h"
++#endif
++
+ #if BUILDFLAG(ENABLE_PAINT_PREVIEW)
+ #include "components/paint_preview/renderer/paint_preview_recorder_impl.h"  // nogncheck
+ #endif
+@@ -473,6 +478,11 @@ void ChromeContentRendererClient::RenderThreadStarted() {
+   WebSecurityPolicy::RegisterURLSchemeAsNotAllowingJavascriptURLs(
+       chrome_search_scheme);
+ 
++#if BUILDFLAG(ENABLE_PRINT_PREVIEW) && BUILDFLAG(ENABLE_PLUGINS)
++  pdf_print_client_ = std::make_unique<ChromePDFPrintClient>();
++  pdf::PepperPDFHost::SetPrintClient(pdf_print_client_.get());
++#endif
++
+   for (auto& scheme :
+        secure_origin_allowlist::GetSchemesBypassingSecureContextCheck()) {
+     WebSecurityPolicy::AddSchemeToSecureContextSafelist(
+diff --git a/chrome/renderer/chrome_content_renderer_client.h b/chrome/renderer/chrome_content_renderer_client.h
+index 743e9836d5e11..96bb5c9859c3b 100644
+--- a/chrome/renderer/chrome_content_renderer_client.h
++++ b/chrome/renderer/chrome_content_renderer_client.h
+@@ -43,6 +43,9 @@
+ #endif
+ 
+ class ChromeRenderThreadObserver;
++#if BUILDFLAG(ENABLE_PRINT_PREVIEW) && BUILDFLAG(ENABLE_PLUGINS)
++class ChromePDFPrintClient;
++#endif
+ #if BUILDFLAG(ENABLE_SPELLCHECK)
+ class SpellCheck;
+ #endif
+@@ -274,6 +277,9 @@ class ChromeContentRendererClient
+       subresource_filter_ruleset_dealer_;
+   std::unique_ptr<fingerprinting_protection_filter::UnverifiedRulesetDealer>
+       fingerprinting_protection_ruleset_dealer_;
++#if BUILDFLAG(ENABLE_PRINT_PREVIEW) && BUILDFLAG(ENABLE_PLUGINS)
++  std::unique_ptr<ChromePDFPrintClient> pdf_print_client_;
++#endif
+ #if BUILDFLAG(ENABLE_PLUGINS)
+   std::set<std::string> allowed_camera_device_origins_;
+ #endif
+diff --git a/chrome/renderer/pepper/chrome_pdf_print_client.cc b/chrome/renderer/pepper/chrome_pdf_print_client.cc
+new file mode 100644
+index 0000000000000..02cd6bfda68b3
+--- /dev/null
++++ b/chrome/renderer/pepper/chrome_pdf_print_client.cc
+@@ -0,0 +1,53 @@
++// Copyright 2014 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/renderer/pepper/chrome_pdf_print_client.h"
++
++#include "components/printing/renderer/print_render_frame_helper.h"
++#include "content/public/renderer/pepper_plugin_instance.h"
++#include "content/public/renderer/render_frame.h"
++#include "third_party/blink/public/web/web_document.h"
++#include "third_party/blink/public/web/web_element.h"
++#include "third_party/blink/public/web/web_local_frame.h"
++#include "third_party/blink/public/web/web_plugin_container.h"
++
++namespace {
++
++blink::WebElement GetWebElement(PP_Instance instance_id) {
++  content::PepperPluginInstance* instance =
++      content::PepperPluginInstance::Get(instance_id);
++  if (!instance)
++    return blink::WebElement();
++  return instance->GetContainer()->GetElement();
++}
++
++printing::PrintRenderFrameHelper* GetPrintRenderFrameHelper(
++    const blink::WebElement& element) {
++  if (element.IsNull())
++    return nullptr;
++  auto* render_frame =
++      content::RenderFrame::FromWebFrame(element.GetDocument().GetFrame());
++  return printing::PrintRenderFrameHelper::Get(render_frame);
++}
++
++}  // namespace
++
++ChromePDFPrintClient::ChromePDFPrintClient() {}
++
++ChromePDFPrintClient::~ChromePDFPrintClient() {}
++
++bool ChromePDFPrintClient::IsPrintingEnabled(PP_Instance instance_id) {
++  blink::WebElement element = GetWebElement(instance_id);
++  printing::PrintRenderFrameHelper* helper = GetPrintRenderFrameHelper(element);
++  return helper && true;
++}
++
++bool ChromePDFPrintClient::Print(PP_Instance instance_id) {
++  blink::WebElement element = GetWebElement(instance_id);
++  printing::PrintRenderFrameHelper* helper = GetPrintRenderFrameHelper(element);
++  if (!helper)
++    return false;
++  helper->PrintNode(element);
++  return true;
++}
+diff --git a/chrome/renderer/pepper/chrome_pdf_print_client.h b/chrome/renderer/pepper/chrome_pdf_print_client.h
+new file mode 100644
+index 0000000000000..871f4c62040a9
+--- /dev/null
++++ b/chrome/renderer/pepper/chrome_pdf_print_client.h
+@@ -0,0 +1,25 @@
++// Copyright 2014 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_RENDERER_PEPPER_CHROME_PDF_PRINT_CLIENT_H_
++#define CHROME_RENDERER_PEPPER_CHROME_PDF_PRINT_CLIENT_H_
++
++#include "components/pdf/renderer/pepper_pdf_host.h"
++
++class ChromePDFPrintClient : public pdf::PepperPDFHost::PrintClient {
++ public:
++  ChromePDFPrintClient();
++
++  ChromePDFPrintClient(const ChromePDFPrintClient&) = delete;
++  ChromePDFPrintClient& operator=(const ChromePDFPrintClient&) = delete;
++
++  ~ChromePDFPrintClient() override;
++
++ private:
++  // pdf::PepperPDFHost::PrintClient:
++  bool IsPrintingEnabled(PP_Instance instance_id) override;
++  bool Print(PP_Instance instance_id) override;
++};
++
++#endif  // CHROME_RENDERER_PEPPER_CHROME_PDF_PRINT_CLIENT_H_
+diff --git a/chrome/renderer/pepper/chrome_renderer_pepper_host_factory.cc b/chrome/renderer/pepper/chrome_renderer_pepper_host_factory.cc
+index e3ee403ec5d4d..4b84f4ef068a7 100644
+--- a/chrome/renderer/pepper/chrome_renderer_pepper_host_factory.cc
++++ b/chrome/renderer/pepper/chrome_renderer_pepper_host_factory.cc
+@@ -5,8 +5,11 @@
+ #include "chrome/renderer/pepper/chrome_renderer_pepper_host_factory.h"
+ 
+ #include "base/check_op.h"
++#include "chrome/renderer/pepper/pepper_flash_font_file_host.h"
+ #include "chrome/renderer/pepper/pepper_uma_host.h"
++#include "components/pdf/renderer/pepper_pdf_host.h"
+ #include "content/public/renderer/renderer_ppapi_host.h"
++#include "pdf/buildflags.h"
+ #include "ppapi/host/ppapi_host.h"
+ #include "ppapi/host/resource_host.h"
+ #include "ppapi/proxy/ppapi_message_utils.h"
+@@ -33,6 +36,36 @@ ChromeRendererPepperHostFactory::CreateResourceHost(
+   if (!host_->IsValidInstance(instance))
+     return nullptr;
+ 
++  // TODO(raymes): PDF also needs access to the FlashFontFileHost currently.
++  // We should either rename PPB_FlashFont_File to PPB_FontFile_Private or get
++  // rid of its use in PDF if possible.
++  if (host_->GetPpapiHost()->permissions().HasPermission(
++          ppapi::PERMISSION_PDF)) {
++    switch (message.type()) {
++      case PpapiHostMsg_FlashFontFile_Create::ID: {
++        ppapi::proxy::SerializedFontDescription description;
++        PP_PrivateFontCharset charset;
++        if (ppapi::UnpackMessage<PpapiHostMsg_FlashFontFile_Create>(
++                message, &description, &charset)) {
++          return std::make_unique<PepperFlashFontFileHost>(
++              host_, instance, resource, description, charset);
++        }
++        break;
++      }
++    }
++  }
++
++#if BUILDFLAG(ENABLE_PDF)
++  if (host_->GetPpapiHost()->permissions().HasPermission(
++          ppapi::PERMISSION_PDF)) {
++    switch (message.type()) {
++      case PpapiHostMsg_PDF_Create::ID: {
++        return std::make_unique<pdf::PepperPDFHost>(host_, instance, resource);
++      }
++    }
++  }
++#endif
++
+   // Permissions for the following interfaces will be checked at the
+   // time of the corresponding instance's method calls.  Currently these
+   // interfaces are available only for whitelisted apps which may not have
+diff --git a/chrome/test/ppapi/ppapi_browsertest.cc b/chrome/test/ppapi/ppapi_browsertest.cc
+index 108660b24c116..3af594032c9d3 100644
+--- a/chrome/test/ppapi/ppapi_browsertest.cc
++++ b/chrome/test/ppapi/ppapi_browsertest.cc
+@@ -2072,6 +2072,8 @@ TEST_PPAPI_NACL(MAYBE_MessageHandler)
+ TEST_PPAPI_NACL(MessageLoop_Basics)
+ TEST_PPAPI_NACL(MessageLoop_Post)
+ 
++TEST_PPAPI_OUT_OF_PROCESS(PDF)
++
+ #if BUILDFLAG(ENABLE_NACL)
+ class PackagedAppTest : public extensions::ExtensionBrowserTest {
+  public:
+diff --git a/components/pdf/renderer/BUILD.gn b/components/pdf/renderer/BUILD.gn
+index 651c7be621d79..d61e395a8a919 100644
+--- a/components/pdf/renderer/BUILD.gn
++++ b/components/pdf/renderer/BUILD.gn
+@@ -15,6 +15,7 @@ static_library("renderer") {
+     "pdf_accessibility_tree.h",
+     "pdf_ax_action_target.h",
+     "pdf_internal_plugin_delegate.h",
++    "pepper_pdf_host.h",
+   ]
+ 
+   sources = [
+@@ -24,6 +25,7 @@ static_library("renderer") {
+     "pdf_internal_plugin_delegate.cc",
+     "pdf_view_web_plugin_client.cc",
+     "pdf_view_web_plugin_client.h",
++    "pepper_pdf_host.cc",
+   ]
+ 
+   deps = [
+diff --git a/components/pdf/renderer/OWNERS b/components/pdf/renderer/OWNERS
+new file mode 100644
+index 0000000000000..5679ef17cb104
+--- /dev/null
++++ b/components/pdf/renderer/OWNERS
+@@ -0,0 +1,2 @@
++per-file pepper_pdf_host.*=bbudge@chromium.org
++per-file pepper_pdf_host.*=raymes@chromium.org
+diff --git a/components/pdf/renderer/pepper_pdf_host.cc b/components/pdf/renderer/pepper_pdf_host.cc
+new file mode 100644
+index 0000000000000..c76d903481aca
+--- /dev/null
++++ b/components/pdf/renderer/pepper_pdf_host.cc
+@@ -0,0 +1,603 @@
++// Copyright 2014 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "components/pdf/renderer/pepper_pdf_host.h"
++
++#include <memory>
++
++#include "base/lazy_instance.h"
++#include "base/threading/thread_local.h"
++#include "components/pdf/renderer/pdf_accessibility_tree.h"
++#include "content/public/renderer/pepper_plugin_instance.h"
++#include "content/public/renderer/ppapi_gfx_conversion.h"
++#include "content/public/renderer/render_frame.h"
++#include "content/public/renderer/render_thread.h"
++#include "content/public/renderer/renderer_ppapi_host.h"
++#include "pdf/accessibility_structs.h"
++#include "ppapi/c/pp_bool.h"
++#include "ppapi/c/private/ppp_pdf.h"
++#include "ppapi/host/dispatch_host_message.h"
++#include "ppapi/host/host_message_context.h"
++#include "ppapi/host/ppapi_host.h"
++#include "ppapi/proxy/host_dispatcher.h"
++#include "ppapi/proxy/ppapi_messages.h"
++#include "ppapi/proxy/ppb_image_data_proxy.h"
++#include "ppapi/shared_impl/ppb_image_data_shared.h"
++#include "ppapi/shared_impl/scoped_pp_resource.h"
++#include "ppapi/thunk/enter.h"
++#include "ppapi/thunk/ppb_image_data_api.h"
++#include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
++#include "third_party/blink/public/platform/web_string.h"
++#include "third_party/blink/public/web/web_document.h"
++#include "third_party/blink/public/web/web_local_frame.h"
++#include "third_party/blink/public/web/web_plugin_container.h"
++#include "ui/gfx/geometry/point.h"
++
++namespace pdf {
++
++namespace {
++
++// --single-process model may fail in CHECK(!g_print_client) if there exist
++// more than two RenderThreads, so here we use TLS for g_print_client.
++// See http://crbug.com/457580.
++base::LazyInstance<base::ThreadLocalPointer<PepperPDFHost::PrintClient>>::Leaky
++    g_print_client_tls = LAZY_INSTANCE_INITIALIZER;
++
++struct ImagePosition {
++  int32_t page_index;
++  int32_t page_object_index;
++};
++
++bool operator<(const ImagePosition& p1, const ImagePosition& p2) {
++  return (p1.page_index < p2.page_index ||
++          (p1.page_index == p2.page_index &&
++           p1.page_object_index < p2.page_object_index));
++}
++
++// This class overrides PdfAccessibilityImageFetcher to return an image from
++// previously stored images, instead of looking for it in the PDF.
++class TestPdfAccessibilityImageFetcher
++    : public chrome_pdf::PdfAccessibilityImageFetcher {
++ public:
++  TestPdfAccessibilityImageFetcher() {
++    default_bitmap_.allocN32Pixels(/*width=*/1, /*height=*/1,
++                                   /*isOpaque=*/false);
++  }
++
++  ~TestPdfAccessibilityImageFetcher() override = default;
++
++  SkBitmap GetImageForOcr(int32_t page_index,
++                          int32_t page_object_index) override {
++    auto image = images_.find(ImagePosition(page_index, page_object_index));
++    return image != images_.end() ? image->second : default_bitmap_;
++  }
++
++  void AddImage(int32_t page_index,
++                int32_t page_object_index,
++                SkBitmap bitmap) {
++    images_[ImagePosition(page_index, page_object_index)] = std::move(bitmap);
++  }
++
++ private:
++  // Keeps images for (page_index, page_object_index) positions.
++  std::map<ImagePosition, SkBitmap> images_;
++
++  // Returned for all requests that have no assigned bitmap in `images_`.
++  SkBitmap default_bitmap_;
++
++  chrome_pdf::AccessibilityActionData received_action_data_;
++};
++
++  TestPdfAccessibilityImageFetcher image_fetcher_;
++
++}  // namespace
++
++PepperPDFHost::PepperPDFHost(content::RendererPpapiHost* host,
++                             PP_Instance instance,
++                             PP_Resource resource)
++    : ppapi::host::ResourceHost(host->GetPpapiHost(), instance, resource),
++      host_(host) {
++  mojom::PdfHost* service = GetRemotePdfService();
++  if (!service)
++    return;
++
++  service->SetListener(receiver_.BindNewPipeAndPassRemote());
++}
++
++PepperPDFHost::~PepperPDFHost() {}
++
++// static
++bool PepperPDFHost::InvokePrintingForInstance(PP_Instance instance_id) {
++  return g_print_client_tls.Pointer()->Get()
++             ? g_print_client_tls.Pointer()->Get()->Print(instance_id)
++             : false;
++}
++
++// static
++void PepperPDFHost::SetPrintClient(PepperPDFHost::PrintClient* client) {
++  CHECK(!g_print_client_tls.Pointer()->Get())
++      << "There should only be a single PrintClient for one RenderThread.";
++  g_print_client_tls.Pointer()->Set(client);
++}
++
++int32_t PepperPDFHost::OnResourceMessageReceived(
++    const IPC::Message& msg,
++    ppapi::host::HostMessageContext* context) {
++  PPAPI_BEGIN_MESSAGE_MAP(PepperPDFHost, msg)
++    PPAPI_DISPATCH_HOST_RESOURCE_CALL_0(PpapiHostMsg_PDF_DidStartLoading,
++                                        OnHostMsgDidStartLoading)
++    PPAPI_DISPATCH_HOST_RESOURCE_CALL_0(PpapiHostMsg_PDF_DidStopLoading,
++                                        OnHostMsgDidStopLoading)
++    PPAPI_DISPATCH_HOST_RESOURCE_CALL(PpapiHostMsg_PDF_UserMetricsRecordAction,
++                                      OnHostMsgUserMetricsRecordAction)
++    PPAPI_DISPATCH_HOST_RESOURCE_CALL_0(PpapiHostMsg_PDF_HasUnsupportedFeature,
++                                        OnHostMsgHasUnsupportedFeature)
++    PPAPI_DISPATCH_HOST_RESOURCE_CALL_0(PpapiHostMsg_PDF_Print, OnHostMsgPrint)
++    PPAPI_DISPATCH_HOST_RESOURCE_CALL_0(PpapiHostMsg_PDF_SaveAs,
++                                        OnHostMsgSaveAs)
++    PPAPI_DISPATCH_HOST_RESOURCE_CALL(PpapiHostMsg_PDF_ShowAlertDialog,
++                                      OnHostMsgShowAlertDialog)
++    PPAPI_DISPATCH_HOST_RESOURCE_CALL(PpapiHostMsg_PDF_ShowConfirmDialog,
++                                      OnHostMsgShowConfirmDialog)
++    PPAPI_DISPATCH_HOST_RESOURCE_CALL(PpapiHostMsg_PDF_ShowPromptDialog,
++                                      OnHostMsgShowPromptDialog)
++    PPAPI_DISPATCH_HOST_RESOURCE_CALL(PpapiHostMsg_PDF_SetSelectedText,
++                                      OnHostMsgSetSelectedText)
++    PPAPI_DISPATCH_HOST_RESOURCE_CALL(PpapiHostMsg_PDF_SetLinkUnderCursor,
++                                      OnHostMsgSetLinkUnderCursor)
++    PPAPI_DISPATCH_HOST_RESOURCE_CALL(PpapiHostMsg_PDF_SetContentRestriction,
++                                      OnHostMsgSetContentRestriction)
++    PPAPI_DISPATCH_HOST_RESOURCE_CALL(
++        PpapiHostMsg_PDF_SetAccessibilityViewportInfo,
++        OnHostMsgSetAccessibilityViewportInfo)
++    PPAPI_DISPATCH_HOST_RESOURCE_CALL(
++        PpapiHostMsg_PDF_SetAccessibilityDocInfo,
++        OnHostMsgSetAccessibilityDocInfo)
++    PPAPI_DISPATCH_HOST_RESOURCE_CALL(
++        PpapiHostMsg_PDF_SetAccessibilityPageInfo,
++        OnHostMsgSetAccessibilityPageInfo)
++    PPAPI_DISPATCH_HOST_RESOURCE_CALL(PpapiHostMsg_PDF_SelectionChanged,
++                                      OnHostMsgSelectionChanged)
++    PPAPI_DISPATCH_HOST_RESOURCE_CALL(PpapiHostMsg_PDF_SetPluginCanSave,
++                                      OnHostMsgSetPluginCanSave)
++  PPAPI_END_MESSAGE_MAP()
++  return PP_ERROR_FAILED;
++}
++
++int32_t PepperPDFHost::OnHostMsgDidStartLoading(
++    ppapi::host::HostMessageContext* context) {
++  content::RenderFrame* render_frame = GetRenderFrame();
++  if (!render_frame)
++    return PP_ERROR_FAILED;
++
++  render_frame->PluginDidStartLoading();
++  return PP_OK;
++}
++
++int32_t PepperPDFHost::OnHostMsgDidStopLoading(
++    ppapi::host::HostMessageContext* context) {
++  content::RenderFrame* render_frame = GetRenderFrame();
++  if (!render_frame)
++    return PP_ERROR_FAILED;
++
++  render_frame->PluginDidStopLoading();
++  return PP_OK;
++}
++
++int32_t PepperPDFHost::OnHostMsgSetContentRestriction(
++    ppapi::host::HostMessageContext* context,
++    int restrictions) {
++  mojom::PdfHost* service = GetRemotePdfService();
++  if (!service)
++    return PP_ERROR_FAILED;
++
++  service->UpdateContentRestrictions(restrictions);
++  return PP_OK;
++}
++
++int32_t PepperPDFHost::OnHostMsgUserMetricsRecordAction(
++    ppapi::host::HostMessageContext* context,
++    const std::string& action) {
++  if (action.empty())
++    return PP_ERROR_FAILED;
++  content::RenderThread::Get()->RecordComputedAction(action);
++  return PP_OK;
++}
++
++int32_t PepperPDFHost::OnHostMsgHasUnsupportedFeature(
++    ppapi::host::HostMessageContext* context) {
++  mojom::PdfHost* service = GetRemotePdfService();
++  if (!service)
++    return PP_ERROR_FAILED;
++
++  service->HasUnsupportedFeature();
++  return PP_OK;
++}
++
++int32_t PepperPDFHost::OnHostMsgPrint(
++    ppapi::host::HostMessageContext* context) {
++  return InvokePrintingForInstance(pp_instance()) ? PP_OK : PP_ERROR_FAILED;
++}
++
++int32_t PepperPDFHost::OnHostMsgShowAlertDialog(
++    ppapi::host::HostMessageContext* context,
++    const std::string& message) {
++  blink::WebLocalFrame* frame = GetWebLocalFrame();
++  if (!frame)
++    return PP_ERROR_FAILED;
++
++  frame->Alert(blink::WebString::FromUTF8(message));
++  context->reply_msg = PpapiPluginMsg_PDF_ShowAlertDialogReply();
++  return PP_OK;
++}
++
++int32_t PepperPDFHost::OnHostMsgShowConfirmDialog(
++    ppapi::host::HostMessageContext* context,
++    const std::string& message) {
++  blink::WebLocalFrame* frame = GetWebLocalFrame();
++  if (!frame)
++    return PP_ERROR_FAILED;
++
++  bool bool_result = frame->Confirm(blink::WebString::FromUTF8(message));
++  context->reply_msg = PpapiPluginMsg_PDF_ShowConfirmDialogReply(bool_result);
++  return PP_OK;
++}
++
++int32_t PepperPDFHost::OnHostMsgShowPromptDialog(
++    ppapi::host::HostMessageContext* context,
++    const std::string& message,
++    const std::string& default_answer) {
++  blink::WebLocalFrame* frame = GetWebLocalFrame();
++  if (!frame)
++    return PP_ERROR_FAILED;
++
++  blink::WebString result =
++      frame->Prompt(blink::WebString::FromUTF8(message),
++                    blink::WebString::FromUTF8(default_answer));
++  context->reply_msg = PpapiPluginMsg_PDF_ShowPromptDialogReply(result.Utf8());
++  return PP_OK;
++}
++
++int32_t PepperPDFHost::OnHostMsgSaveAs(
++    ppapi::host::HostMessageContext* context) {
++  content::PepperPluginInstance* instance =
++      host_->GetPluginInstance(pp_instance());
++  if (!instance)
++    return PP_ERROR_FAILED;
++
++  mojom::PdfHost* service = GetRemotePdfService();
++  if (!service)
++    return PP_ERROR_FAILED;
++
++  service->SaveUrlAs(instance->GetPluginURL(),
++                     network::mojom::ReferrerPolicy::kDefault);
++  return PP_OK;
++}
++
++int32_t PepperPDFHost::OnHostMsgSetSelectedText(
++    ppapi::host::HostMessageContext* context,
++    const std::u16string& selected_text) {
++  content::PepperPluginInstance* instance =
++      host_->GetPluginInstance(pp_instance());
++  if (!instance)
++    return PP_ERROR_FAILED;
++  instance->SetSelectedText(selected_text);
++  return PP_OK;
++}
++
++int32_t PepperPDFHost::OnHostMsgSetLinkUnderCursor(
++    ppapi::host::HostMessageContext* context,
++    const std::string& url) {
++  content::PepperPluginInstance* instance =
++      host_->GetPluginInstance(pp_instance());
++  if (!instance)
++    return PP_ERROR_FAILED;
++  instance->SetLinkUnderCursor(url);
++  return PP_OK;
++}
++
++int32_t PepperPDFHost::OnHostMsgSetAccessibilityViewportInfo(
++    ppapi::host::HostMessageContext* context,
++    const PP_PrivateAccessibilityViewportInfo& pp_viewport_info) {
++  if (!host_->GetPluginInstance(pp_instance()))
++    return PP_ERROR_FAILED;
++  CreatePdfAccessibilityTreeIfNeeded();
++  chrome_pdf::AccessibilityViewportInfo viewport_info;
++    viewport_info.zoom = pp_viewport_info.zoom,
++    viewport_info.scale = pp_viewport_info.scale,
++    viewport_info.scroll = gfx::Point(pp_viewport_info.scroll.x, pp_viewport_info.scroll.y),
++    viewport_info.offset = gfx::Point(pp_viewport_info.offset.x, pp_viewport_info.offset.y),
++    viewport_info.selection_start_page_index = pp_viewport_info.selection_start_page_index,
++    viewport_info.selection_start_char_index = pp_viewport_info.selection_start_char_index,
++    viewport_info.selection_end_page_index = pp_viewport_info.selection_end_page_index,
++    viewport_info.selection_end_char_index = pp_viewport_info.selection_end_char_index,
++    viewport_info.focus_info = {static_cast<chrome_pdf::FocusObjectType>(
++           pp_viewport_info.focus_info.focused_object_type),
++       pp_viewport_info.focus_info.focused_object_page_index,
++       pp_viewport_info.focus_info.focused_annotation_index_in_page};
++  pdf_accessibility_tree_->SetAccessibilityViewportInfo(viewport_info);
++  return PP_OK;
++}
++
++int32_t PepperPDFHost::OnHostMsgSetAccessibilityDocInfo(
++    ppapi::host::HostMessageContext* context,
++    const PP_PrivateAccessibilityDocInfo& pp_doc_info) {
++  if (!host_->GetPluginInstance(pp_instance()))
++    return PP_ERROR_FAILED;
++  CreatePdfAccessibilityTreeIfNeeded();
++  chrome_pdf::AccessibilityDocInfo doc_info = {
++      pp_doc_info.page_count, PP_ToBool(pp_doc_info.text_accessible),
++      PP_ToBool(pp_doc_info.text_copyable)};
++  pdf_accessibility_tree_->SetAccessibilityDocInfo(doc_info);
++  return PP_OK;
++}
++
++namespace {
++
++chrome_pdf::AccessibilityTextStyleInfo ToAccessibilityTextStyleInfo(
++    const ppapi::PdfAccessibilityTextStyleInfo& pp_style) {
++  chrome_pdf::AccessibilityTextStyleInfo style;
++  style.font_name = pp_style.font_name;
++  style.font_weight = pp_style.font_weight;
++  style.render_mode = static_cast<chrome_pdf::AccessibilityTextRenderMode>(
++      pp_style.render_mode);
++  style.font_size = pp_style.font_size;
++  style.fill_color = pp_style.fill_color;
++  style.stroke_color = pp_style.stroke_color;
++  style.is_italic = pp_style.is_italic;
++  style.is_bold = pp_style.is_bold;
++  return style;
++}
++
++chrome_pdf::AccessibilityPageObjects ToAccessibilityPageObjects(
++    const ppapi::PdfAccessibilityPageObjects& pp_page_objects) {
++  chrome_pdf::AccessibilityPageObjects page_objects;
++
++  page_objects.links.reserve(pp_page_objects.links.size());
++  for (const ppapi::PdfAccessibilityLinkInfo& pp_link : pp_page_objects.links) {
++    chrome_pdf::AccessibilityTextRunRangeInfo range_info = {
++        pp_link.text_run_index, pp_link.text_run_count};
++    page_objects.links.emplace_back(pp_link.url, pp_link.index_in_page,
++                                    content::PP_ToGfxRectF(pp_link.bounds),
++                                    std::move(range_info));
++  }
++
++  page_objects.images.reserve(pp_page_objects.images.size());
++  for (const ppapi::PdfAccessibilityImageInfo& pp_image :
++       pp_page_objects.images) {
++    page_objects.images.emplace_back(pp_image.alt_text, pp_image.text_run_index,
++                                     content::PP_ToGfxRectF(pp_image.bounds), /*page_index=*/0);
++  }
++
++  page_objects.highlights.reserve(pp_page_objects.highlights.size());
++  for (const ppapi::PdfAccessibilityHighlightInfo& pp_highlight :
++       pp_page_objects.highlights) {
++    chrome_pdf::AccessibilityTextRunRangeInfo range_info = {
++        pp_highlight.text_run_index, pp_highlight.text_run_count};
++    page_objects.highlights.emplace_back(
++        pp_highlight.note_text, pp_highlight.index_in_page, pp_highlight.color,
++        content::PP_ToGfxRectF(pp_highlight.bounds), std::move(range_info));
++  }
++
++  page_objects.form_fields.text_fields.reserve(
++      pp_page_objects.form_fields.text_fields.size());
++  for (const ppapi::PdfAccessibilityTextFieldInfo& pp_text_field :
++       pp_page_objects.form_fields.text_fields) {
++    page_objects.form_fields.text_fields.emplace_back(
++        pp_text_field.name, pp_text_field.value, pp_text_field.is_read_only,
++        pp_text_field.is_required, pp_text_field.is_password,
++        pp_text_field.index_in_page, pp_text_field.text_run_index,
++        content::PP_ToGfxRectF(pp_text_field.bounds));
++  }
++
++  page_objects.form_fields.choice_fields.reserve(
++      pp_page_objects.form_fields.choice_fields.size());
++  for (const ppapi::PdfAccessibilityChoiceFieldInfo& pp_choice_field :
++       pp_page_objects.form_fields.choice_fields) {
++    std::vector<chrome_pdf::AccessibilityChoiceFieldOptionInfo> options;
++    options.reserve(pp_choice_field.options.size());
++    for (const ppapi::PdfAccessibilityChoiceFieldOptionInfo& pp_option :
++         pp_choice_field.options) {
++      options.push_back({pp_option.name, pp_option.is_selected,
++                         content::PP_ToGfxRectF(pp_option.bounds)});
++    }
++
++    page_objects.form_fields.choice_fields.emplace_back(
++        pp_choice_field.name, std::move(options),
++        static_cast<chrome_pdf::ChoiceFieldType>(pp_choice_field.type),
++        pp_choice_field.is_read_only, pp_choice_field.is_multi_select,
++        pp_choice_field.has_editable_text_box, pp_choice_field.index_in_page,
++        pp_choice_field.text_run_index,
++        content::PP_ToGfxRectF(pp_choice_field.bounds));
++  }
++
++  page_objects.form_fields.buttons.reserve(
++      pp_page_objects.form_fields.buttons.size());
++  for (const ppapi::PdfAccessibilityButtonInfo& pp_button :
++       pp_page_objects.form_fields.buttons) {
++    page_objects.form_fields.buttons.emplace_back(
++        pp_button.name, pp_button.value,
++        static_cast<chrome_pdf::ButtonType>(pp_button.type),
++        pp_button.is_read_only, pp_button.is_checked, pp_button.control_count,
++        pp_button.control_index, pp_button.index_in_page,
++        pp_button.text_run_index, content::PP_ToGfxRectF(pp_button.bounds));
++  }
++
++  return page_objects;
++}
++
++}  // namespace
++
++int32_t PepperPDFHost::OnHostMsgSetAccessibilityPageInfo(
++    ppapi::host::HostMessageContext* context,
++    const PP_PrivateAccessibilityPageInfo& pp_page_info,
++    const std::vector<ppapi::PdfAccessibilityTextRunInfo>& pp_text_run_infos,
++    const std::vector<PP_PrivateAccessibilityCharInfo>& pp_chars,
++    const ppapi::PdfAccessibilityPageObjects& pp_page_objects) {
++  if (!host_->GetPluginInstance(pp_instance()))
++    return PP_ERROR_FAILED;
++  CreatePdfAccessibilityTreeIfNeeded();
++  chrome_pdf::AccessibilityPageInfo page_info = {
++      pp_page_info.page_index, content::PP_ToGfxRect(pp_page_info.bounds),
++      pp_page_info.text_run_count, pp_page_info.char_count};
++  std::vector<chrome_pdf::AccessibilityTextRunInfo> text_run_infos;
++  text_run_infos.reserve(pp_text_run_infos.size());
++  for (const auto& pp_text_run_info : pp_text_run_infos) {
++    text_run_infos.emplace_back(
++        pp_text_run_info.len, content::PP_ToGfxRectF(pp_text_run_info.bounds),
++        static_cast<chrome_pdf::AccessibilityTextDirection>(
++            pp_text_run_info.direction),
++        ToAccessibilityTextStyleInfo(pp_text_run_info.style));
++  }
++  std::vector<chrome_pdf::AccessibilityCharInfo> chars;
++  chars.reserve(pp_chars.size());
++  for (const auto& pp_char : pp_chars)
++    chars.push_back({pp_char.unicode_character, pp_char.char_width});
++  chrome_pdf::AccessibilityPageObjects page_objects =
++      ToAccessibilityPageObjects(pp_page_objects);
++  pdf_accessibility_tree_->SetAccessibilityPageInfo(page_info, text_run_infos,
++                                                    chars, page_objects);
++  return PP_OK;
++}
++
++int32_t PepperPDFHost::OnHostMsgSelectionChanged(
++    ppapi::host::HostMessageContext* context,
++    const PP_FloatPoint& left,
++    int32_t left_height,
++    const PP_FloatPoint& right,
++    int32_t right_height) {
++  mojom::PdfHost* service = GetRemotePdfService();
++  if (!service)
++    return PP_ERROR_FAILED;
++
++  service->SelectionChanged(gfx::PointF(left.x, left.y), left_height,
++                            gfx::PointF(right.x, right.y), right_height);
++  return PP_OK;
++}
++
++int32_t PepperPDFHost::OnHostMsgSetPluginCanSave(
++    ppapi::host::HostMessageContext* context,
++    bool can_save) {
++  mojom::PdfHost* service = GetRemotePdfService();
++  if (!service)
++    return PP_ERROR_FAILED;
++
++  service->SetPluginCanSave(can_save);
++  return PP_OK;
++}
++
++void PepperPDFHost::CreatePdfAccessibilityTreeIfNeeded() {
++  if (!pdf_accessibility_tree_) {
++    pdf_accessibility_tree_ =
++        std::make_unique<PdfAccessibilityTree>(GetRenderFrame(), this, &image_fetcher_, nullptr, false);
++  }
++}
++
++content::RenderFrame* PepperPDFHost::GetRenderFrame() {
++  content::PepperPluginInstance* instance =
++      host_->GetPluginInstance(pp_instance());
++  return instance ? instance->GetRenderFrame() : nullptr;
++}
++
++mojom::PdfHost* PepperPDFHost::GetRemotePdfService() {
++  content::RenderFrame* render_frame = GetRenderFrame();
++  if (!render_frame)
++    return nullptr;
++
++  if (!remote_pdf_service_) {
++    render_frame->GetRemoteAssociatedInterfaces()->GetInterface(
++        remote_pdf_service_.BindNewEndpointAndPassReceiver());
++  }
++  return remote_pdf_service_.get();
++}
++
++blink::WebLocalFrame* PepperPDFHost::GetWebLocalFrame() {
++  if (!host_->GetPluginInstance(pp_instance()))
++    return nullptr;
++
++  blink::WebPluginContainer* container =
++      host_->GetContainerForInstance(pp_instance());
++  if (!container)
++    return nullptr;
++
++  return container->GetDocument().GetFrame();
++}
++
++void PepperPDFHost::SetCaretPosition(const gfx::PointF& position) {
++  content::PepperPluginInstance* instance =
++      host_->GetPluginInstance(pp_instance());
++  if (instance)
++    instance->SetCaretPosition(position);
++}
++
++void PepperPDFHost::MoveRangeSelectionExtent(const gfx::PointF& extent) {
++  content::PepperPluginInstance* instance =
++      host_->GetPluginInstance(pp_instance());
++  if (instance)
++    instance->MoveRangeSelectionExtent(extent);
++}
++
++void PepperPDFHost::SetSelectionBounds(const gfx::PointF& base,
++                                       const gfx::PointF& extent) {
++  content::PepperPluginInstance* instance =
++      host_->GetPluginInstance(pp_instance());
++  if (instance)
++    instance->SetSelectionBounds(base, extent);
++}
++
++void PepperPDFHost::GetPdfBytes(uint32_t size_limit, GetPdfBytesCallback callback) {
++}
++
++void PepperPDFHost::EnableAccessibility() {
++  // `PepperPluginInstanceImpl` notifies the PDF plugin of accessibility change.
++}
++
++namespace {
++
++PP_PdfPageCharacterIndex ToPdfPageCharacterIndex(
++    const chrome_pdf::PageCharacterIndex& page_char_index) {
++  return {
++      .page_index = page_char_index.page_index,
++      .char_index = page_char_index.char_index,
++  };
++}
++
++PP_PdfAccessibilityActionData ToPdfAccessibilityActionData(
++    const chrome_pdf::AccessibilityActionData& action_data) {
++  return {
++      .action = static_cast<PP_PdfAccessibilityAction>(action_data.action),
++      .annotation_type = static_cast<PP_PdfAccessibilityAnnotationType>(
++          action_data.annotation_type),
++      .target_point = content::PP_FromGfxPoint(action_data.target_point),
++      .target_rect = content::PP_FromGfxRect(action_data.target_rect),
++      .annotation_index = action_data.annotation_index,
++      .page_index = action_data.page_index,
++      .horizontal_scroll_alignment =
++          static_cast<PP_PdfAccessibilityScrollAlignment>(
++              action_data.horizontal_scroll_alignment),
++      .vertical_scroll_alignment =
++          static_cast<PP_PdfAccessibilityScrollAlignment>(
++              action_data.vertical_scroll_alignment),
++      .selection_start_index =
++          ToPdfPageCharacterIndex(action_data.selection_start_index),
++      .selection_end_index =
++          ToPdfPageCharacterIndex(action_data.selection_end_index),
++  };
++}
++
++}  // namespace
++
++void PepperPDFHost::HandleAccessibilityAction(
++    const chrome_pdf::AccessibilityActionData& action_data) {
++  content::PepperPluginInstance* instance =
++      host_->GetPluginInstance(pp_instance());
++  if (instance)
++    instance->HandleAccessibilityAction(
++        ToPdfAccessibilityActionData(action_data));
++}
++
++void PepperPDFHost::LoadOrReloadAccessibility() {
++}
++
++}  // namespace pdf
+diff --git a/components/pdf/renderer/pepper_pdf_host.h b/components/pdf/renderer/pepper_pdf_host.h
+new file mode 100644
+index 0000000000000..b794e1417d24b
+--- /dev/null
++++ b/components/pdf/renderer/pepper_pdf_host.h
+@@ -0,0 +1,163 @@
++// Copyright 2014 The Chromium Authors. All rights reserved.
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef COMPONENTS_PDF_RENDERER_PEPPER_PDF_HOST_H_
++#define COMPONENTS_PDF_RENDERER_PEPPER_PDF_HOST_H_
++
++#include <stdint.h>
++
++#include <memory>
++#include <string>
++#include <vector>
++
++#include "base/compiler_specific.h"
++#include "ipc/ipc_platform_file.h"
++#include "mojo/public/cpp/bindings/associated_remote.h"
++#include "mojo/public/cpp/bindings/receiver.h"
++#include "pdf/buildflags.h"
++#include "pdf/mojom/pdf.mojom.h"
++#include "pdf/pdf_accessibility_action_handler.h"
++#include "pdf/pdf_accessibility_image_fetcher.h"
++#include "ppapi/c/ppb_image_data.h"
++#include "ppapi/c/private/ppb_pdf.h"
++#include "ppapi/host/resource_host.h"
++#include "ppapi/proxy/serialized_structs.h"
++#include "ppapi/shared_impl/pdf_accessibility_shared.h"
++
++#if !BUILDFLAG(ENABLE_PDF)
++#error "PDF must be enabled"
++#endif
++
++namespace blink {
++class WebLocalFrame;
++}
++
++namespace content {
++class RenderFrame;
++class RendererPpapiHost;
++}
++
++namespace ppapi {
++namespace host {
++struct HostMessageContext;
++}  // namespace host
++}  // namespace ppapi
++
++namespace pdf {
++
++class PdfAccessibilityTree;
++
++class PepperPDFHost : public ppapi::host::ResourceHost,
++                      public mojom::PdfListener,
++                      public chrome_pdf::PdfAccessibilityActionHandler {
++ public:
++  class PrintClient {
++   public:
++    virtual ~PrintClient() {}
++
++    // Returns whether printing is enabled for the plugin instance identified by
++    // |instance_id|.
++    virtual bool IsPrintingEnabled(PP_Instance instance_id) = 0;
++
++    // Invokes the "Print" command for the plugin instance identified by
++    // |instance_id|. Returns whether the "Print" command was issued or not.
++    virtual bool Print(PP_Instance instance_id) = 0;
++  };
++
++  PepperPDFHost(content::RendererPpapiHost* host,
++                PP_Instance instance,
++                PP_Resource resource);
++
++  PepperPDFHost(const PepperPDFHost&) = delete;
++  PepperPDFHost& operator=(const PepperPDFHost&) = delete;
++
++  ~PepperPDFHost() override;
++
++  // Invokes the "Print" command for the given instance as if the user right
++  // clicked on it and selected "Print". Returns if the "Print" command was
++  // issued or not.
++  static bool InvokePrintingForInstance(PP_Instance instance);
++
++  // The caller retains the ownership of |print_client|. The client is
++  // allowed to be set only once, and when set, the client must outlive the
++  // PPB_PDF_Impl instance.
++  static void SetPrintClient(PrintClient* print_client);
++
++  // ppapi::host::ResourceHost:
++  int32_t OnResourceMessageReceived(
++      const IPC::Message& msg,
++      ppapi::host::HostMessageContext* context) override;
++
++  // mojom::PdfListener
++  void SetCaretPosition(const gfx::PointF& position) override;
++  void MoveRangeSelectionExtent(const gfx::PointF& extent) override;
++  void SetSelectionBounds(const gfx::PointF& base,
++                          const gfx::PointF& extent) override;
++  void GetPdfBytes(uint32_t size_limit, GetPdfBytesCallback callback) override;
++
++  // chrome_pdf::PdfAccessibilityActionHandler:
++  void EnableAccessibility() override;
++  void HandleAccessibilityAction(
++      const chrome_pdf::AccessibilityActionData& action_data) override;
++  void LoadOrReloadAccessibility() override;
++
++ private:
++  int32_t OnHostMsgDidStartLoading(ppapi::host::HostMessageContext* context);
++  int32_t OnHostMsgDidStopLoading(ppapi::host::HostMessageContext* context);
++  int32_t OnHostMsgSetContentRestriction(
++      ppapi::host::HostMessageContext* context,
++      int restrictions);
++  int32_t OnHostMsgUserMetricsRecordAction(
++      ppapi::host::HostMessageContext* context,
++      const std::string& action);
++  int32_t OnHostMsgHasUnsupportedFeature(
++      ppapi::host::HostMessageContext* context);
++  int32_t OnHostMsgPrint(ppapi::host::HostMessageContext* context);
++  int32_t OnHostMsgSaveAs(ppapi::host::HostMessageContext* context);
++  int32_t OnHostMsgShowAlertDialog(ppapi::host::HostMessageContext* context,
++                                   const std::string& message);
++  int32_t OnHostMsgShowConfirmDialog(ppapi::host::HostMessageContext* context,
++                                     const std::string& message);
++  int32_t OnHostMsgShowPromptDialog(ppapi::host::HostMessageContext* context,
++                                    const std::string& message,
++                                    const std::string& default_answer);
++  int32_t OnHostMsgSetSelectedText(ppapi::host::HostMessageContext* context,
++                                   const std::u16string& selected_text);
++  int32_t OnHostMsgSetLinkUnderCursor(ppapi::host::HostMessageContext* context,
++                                      const std::string& url);
++  int32_t OnHostMsgSetAccessibilityViewportInfo(
++      ppapi::host::HostMessageContext* context,
++      const PP_PrivateAccessibilityViewportInfo& pp_viewport_info);
++  int32_t OnHostMsgSetAccessibilityDocInfo(
++      ppapi::host::HostMessageContext* context,
++      const PP_PrivateAccessibilityDocInfo& pp_doc_info);
++  int32_t OnHostMsgSetAccessibilityPageInfo(
++      ppapi::host::HostMessageContext* context,
++      const PP_PrivateAccessibilityPageInfo& pp_page_info,
++      const std::vector<ppapi::PdfAccessibilityTextRunInfo>& pp_text_run_infos,
++      const std::vector<PP_PrivateAccessibilityCharInfo>& pp_chars,
++      const ppapi::PdfAccessibilityPageObjects& pp_page_objects);
++  int32_t OnHostMsgSelectionChanged(ppapi::host::HostMessageContext* context,
++                                    const PP_FloatPoint& left,
++                                    int32_t left_height,
++                                    const PP_FloatPoint& right,
++                                    int32_t right_height);
++  int32_t OnHostMsgSetPluginCanSave(ppapi::host::HostMessageContext* context,
++                                    bool can_save);
++
++  void CreatePdfAccessibilityTreeIfNeeded();
++
++  content::RenderFrame* GetRenderFrame();
++  mojom::PdfHost* GetRemotePdfService();
++  blink::WebLocalFrame* GetWebLocalFrame();
++
++  std::unique_ptr<PdfAccessibilityTree> pdf_accessibility_tree_;
++  content::RendererPpapiHost* const host_;
++  mojo::AssociatedRemote<mojom::PdfHost> remote_pdf_service_;
++  mojo::Receiver<mojom::PdfListener> receiver_{this};
++};
++
++}  // namespace pdf
++
++#endif  // COMPONENTS_PDF_RENDERER_PEPPER_PDF_HOST_H_

@@ -1,0 +1,208 @@
+diff --git a/content/browser/network_service_instance_impl.cc b/content/browser/network_service_instance_impl.cc
+index 752500fb3afea..3908105d40a31 100644
+--- a/content/browser/network_service_instance_impl.cc
++++ b/content/browser/network_service_instance_impl.cc
+@@ -9,7 +9,6 @@
+ #include <utility>
+ 
+ #include "base/base_paths.h"
+-#include "base/callback_list.h"
+ #include "base/check.h"
+ #include "base/command_line.h"
+ #include "base/environment.h"
+@@ -116,6 +115,7 @@ mojo::Remote<network::mojom::NetworkService>* g_network_service_remote =
+     nullptr;
+ network::NetworkConnectionTracker* g_network_connection_tracker;
+ bool g_network_service_is_responding = false;
++base::Time g_last_network_service_crash;
+ 
+ // A directory name that is created below the http cache path and passed to the
+ // network context when creating a network context with cache enabled.
+@@ -468,17 +468,18 @@ void BindNetworkChangeManagerReceiver(
+   GetNetworkService()->GetNetworkChangeManager(std::move(receiver));
+ }
+ 
+-base::RepeatingCallbackList<void(bool)>& GetProcessGoneHandlersList() {
+-  static base::NoDestructor<base::RepeatingCallbackList<void(bool)>> s_list;
++base::RepeatingClosureList& GetCrashHandlersList() {
++  static base::NoDestructor<base::RepeatingClosureList> s_list;
+   return *s_list;
+ }
+ 
+-void OnNetworkServiceProcessGone(bool crashed) {
++void OnNetworkServiceCrash() {
+   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+   DCHECK(g_network_service_remote);
+   DCHECK(g_network_service_remote->is_bound());
+-  DCHECK(!crashed || !g_network_service_remote->is_connected());
+-  GetProcessGoneHandlersList().Notify(crashed);
++  DCHECK(!g_network_service_remote->is_connected());
++  g_last_network_service_crash = base::Time::Now();
++  GetCrashHandlersList().Notify();
+ }
+ 
+ // Parses the desired granularity of NetLog capturing specified by the command
+@@ -546,6 +547,11 @@ int64_t GetNetMaximumFileSizeFromCommandLine(
+   return max_size_bytes;
+ }
+ 
++base::RepeatingClosure& OnNetworkServiceRestartedCbStorage() {
++  static base::SequenceLocalStorageSlot<base::RepeatingClosure> restarted_cb;
++  return restarted_cb.GetOrCreateValue();
++}
++
+ }  // namespace
+ 
+ uint64_t GetNetLogMaximumFileSizeFromCommandLineForTesting(  // IN-TEST
+@@ -587,7 +593,7 @@ network::mojom::NetworkService* GetNetworkService() {
+         mojo::PendingReceiver<network::mojom::NetworkService> receiver =
+             g_network_service_remote->BindNewPipeAndPassReceiver();
+         g_network_service_remote->set_disconnect_handler(
+-            base::BindOnce(&OnNetworkServiceProcessGone, /*crashed=*/true));
++            base::BindOnce(&OnNetworkServiceCrash));
+         if (IsInProcessNetworkService()) {
+           CreateInProcessNetworkService(std::move(receiver));
+         } else {
+@@ -713,12 +719,12 @@ network::mojom::NetworkService* GetNetworkService() {
+   return g_network_service_remote->get();
+ }
+ 
+-base::CallbackListSubscription RegisterNetworkServiceProcessGoneHandler(
+-    NetworkServiceProcessGoneHandler handler) {
++base::CallbackListSubscription RegisterNetworkServiceCrashHandler(
++    base::RepeatingClosure handler) {
+   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+   DCHECK(!handler.is_null());
+ 
+-  return GetProcessGoneHandlersList().Add(std::move(handler));
++  return GetCrashHandlersList().Add(std::move(handler));
+ }
+ 
+ #if BUILDFLAG(IS_CHROMEOS)
+@@ -796,7 +802,14 @@ void ShutDownNetworkService() {
+ void RestartNetworkService() {
+   ShutDownNetworkService();
+   GetNetworkService();
+-  OnNetworkServiceProcessGone(/*crashed=*/false);
++  if (OnNetworkServiceRestartedCbStorage()) {
++    OnNetworkServiceRestartedCbStorage().Run();
++  }
++}
++
++void OnRestartNetworkServiceForTesting(base::RepeatingClosure on_restart) {
++  DCHECK(!OnNetworkServiceRestartedCbStorage() || !on_restart);
++  OnNetworkServiceRestartedCbStorage() = std::move(on_restart);
+ }
+ 
+ namespace {
+diff --git a/content/browser/network_service_instance_impl.h b/content/browser/network_service_instance_impl.h
+index ec129b5c01c24..1023237d3de25 100644
+--- a/content/browser/network_service_instance_impl.h
++++ b/content/browser/network_service_instance_impl.h
+@@ -19,20 +19,14 @@ CONTENT_EXPORT void ForceCreateNetworkServiceDirectlyForTesting();
+ // Resets the interface ptr to the network service.
+ CONTENT_EXPORT void ResetNetworkServiceForTesting();
+ 
+-using NetworkServiceProcessGoneHandler =
+-    base::RepeatingCallback<void(bool crashed)>;
+-
+ // Registers |handler| to run (on UI thread) after mojo::Remote<NetworkService>
+-// encounters an error, in which case `crashed` will be true, or after the
+-// NetworkService is purposely restarted by the browser, in which case `crashed`
+-// will be false.  Note that there are no ordering guarantees wrt error
++// encounters an error.  Note that there are no ordering guarantees wrt error
+ // handlers for other interfaces (e.g. mojo::Remote<NetworkContext> and/or
+ // mojo::Remote<URLLoaderFactory>).
+ //
+ // Can only be called on the UI thread.  No-op if NetworkService is disabled.
+ CONTENT_EXPORT base::CallbackListSubscription
+-RegisterNetworkServiceProcessGoneHandler(
+-    NetworkServiceProcessGoneHandler handler);
++RegisterNetworkServiceCrashHandler(base::RepeatingClosure handler);
+ 
+ constexpr char kSSLKeyLogFileHistogram[] = "Net.SSLKeyLogFileUse";
+ 
+diff --git a/content/browser/network_service_restart_browsertest.cc b/content/browser/network_service_restart_browsertest.cc
+index a5f4ec6049611..c71f7044ee116 100644
+--- a/content/browser/network_service_restart_browsertest.cc
++++ b/content/browser/network_service_restart_browsertest.cc
+@@ -310,17 +310,15 @@ IN_PROC_BROWSER_TEST_F(NetworkServiceRestartBrowserTest,
+   EXPECT_TRUE(network_context2.is_connected());
+ }
+ 
+-void IncrementIntExpectingCrash(int* i, bool crashed) {
++void IncrementInt(int* i) {
+   *i = *i + 1;
+-  EXPECT_TRUE(crashed);
+ }
+ 
+ // This test verifies basic functionality of RegisterNetworkServiceCrashHandler
+ // and UnregisterNetworkServiceCrashHandler.
+ IN_PROC_BROWSER_TEST_F(NetworkServiceRestartBrowserTest, CrashHandlers) {
+-  if (IsInProcessNetworkService()) {
++  if (IsInProcessNetworkService())
+     return;
+-  }
+   mojo::Remote<network::mojom::NetworkContext> network_context(
+       CreateNetworkContext());
+   EXPECT_TRUE(network_context.is_bound());
+@@ -329,11 +327,11 @@ IN_PROC_BROWSER_TEST_F(NetworkServiceRestartBrowserTest, CrashHandlers) {
+   int counter1 = 0;
+   int counter2 = 0;
+   base::CallbackListSubscription subscription1 =
+-      RegisterNetworkServiceProcessGoneHandler(base::BindRepeating(
+-          &IncrementIntExpectingCrash, base::Unretained(&counter1)));
++      RegisterNetworkServiceCrashHandler(
++          base::BindRepeating(&IncrementInt, base::Unretained(&counter1)));
+   base::CallbackListSubscription subscription2 =
+-      RegisterNetworkServiceProcessGoneHandler(base::BindRepeating(
+-          &IncrementIntExpectingCrash, base::Unretained(&counter2)));
++      RegisterNetworkServiceCrashHandler(
++          base::BindRepeating(&IncrementInt, base::Unretained(&counter2)));
+ 
+   // Crash the NetworkService process.
+   SimulateNetworkServiceCrash();
+diff --git a/content/public/test/browser_test_base.cc b/content/public/test/browser_test_base.cc
+index 854a99ffae501..01be13900b58f 100644
+--- a/content/public/test/browser_test_base.cc
++++ b/content/public/test/browser_test_base.cc
+@@ -14,7 +14,6 @@
+ #include <vector>
+ 
+ #include "base/base_switches.h"
+-#include "base/callback_list.h"
+ #include "base/command_line.h"
+ #include "base/debug/stack_trace.h"
+ #include "base/feature_list.h"
+@@ -919,14 +918,9 @@ void BrowserTestBase::ProxyRunTestOnMainThreadLoop() {
+     }
+     initial_web_contents_.reset();
+ 
+-    base::CallbackListSubscription on_network_service_restarted_subscription =
+-        RegisterNetworkServiceProcessGoneHandler(base::BindRepeating(
+-            [](BrowserTestBase* browser_test_base, bool crashed) {
+-              if (!crashed) {
+-                browser_test_base->ForceInitializeNetworkProcess();
+-              }
+-            },
+-            base::Unretained(this)));
++    OnRestartNetworkServiceForTesting(
++        base::BindRepeating(&BrowserTestBase::ForceInitializeNetworkProcess,
++                            base::Unretained(this)));
+ 
+     SetUpOnMainThread();
+ 
+@@ -957,12 +951,7 @@ void BrowserTestBase::ProxyRunTestOnMainThreadLoop() {
+     TearDownOnMainThread();
+     AssertThatNetworkServiceDidNotCrash();
+ 
+-    // The subscription should be reset after asserting that the network service
+-    // did not crash, otherwise a network service restart task might be
+-    // processed in AssertThatNetworkServiceDidNotCrash() and the network
+-    // service will not be correctly initialized, which causes
+-    // AssertThatNetworkServiceDidNotCrash() to incorrectly report crashes.
+-    on_network_service_restarted_subscription = {};
++    OnRestartNetworkServiceForTesting(base::NullCallback());
+   }
+ 
+   PostRunTestOnMainThread();

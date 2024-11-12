@@ -1,0 +1,67 @@
+diff --git a/fetch_configs/android_internal.py b/fetch_configs/android_internal.py
+index d785246b..2d77532d 100644
+--- a/fetch_configs/android_internal.py
++++ b/fetch_configs/android_internal.py
+@@ -17,7 +17,7 @@ class AndroidInternal(config_util.Config):
+     return {
+       'alias': {
+         'config': 'chromium',
+-        'props': ['--target_os=android', '--internal=True'],
++        'props': ['--target_os=android', '--internal=True', '--flash=False'],
+       },
+     }
+ 
+diff --git a/fetch_configs/chromium.py b/fetch_configs/chromium.py
+index d07d599d..27831fc6 100644
+--- a/fetch_configs/chromium.py
++++ b/fetch_configs/chromium.py
+@@ -26,6 +26,20 @@ class Chromium(config_util.Config):
+             solution['custom_vars']['webkit_revision'] = ''
+         if ast.literal_eval(props.get('internal', 'False')):
+             solution['custom_vars']['checkout_src_internal'] = True
++
++            if not ast.literal_eval(props.get('flash', 'False')):
++                solution['custom_deps'].update({
++                    'src/third_party/adobe/flash/binaries/ppapi/linux': None,
++                    'src/third_party/adobe/flash/binaries/ppapi/linux_x64': None,
++                    'src/third_party/adobe/flash/binaries/ppapi/mac_64': None,
++                    'src/third_party/adobe/flash/binaries/ppapi/win': None,
++                    'src/third_party/adobe/flash/binaries/ppapi/win_x64': None,
++                    'src/third_party/adobe/flash/symbols/ppapi/linux': None,
++                    'src/third_party/adobe/flash/symbols/ppapi/linux_x64': None,
++                    'src/third_party/adobe/flash/symbols/ppapi/mac_64': None,
++                    'src/third_party/adobe/flash/symbols/ppapi/win': None,
++                    'src/third_party/adobe/flash/symbols/ppapi/win_x64': None,
++                })
+         spec = {
+             'solutions': [solution],
+         }
+diff --git a/fetch_configs/ios_internal.py b/fetch_configs/ios_internal.py
+index b2595372..70607aee 100644
+--- a/fetch_configs/ios_internal.py
++++ b/fetch_configs/ios_internal.py
+@@ -18,6 +18,7 @@ class IOSInternal(config_util.Config):
+                 'config':
+                 'chromium',
+                 'props': [
++          '--flash=False',
+           '--internal=True',
+           '--target_os=ios',
+           '--target_os_only=True',
+diff --git a/gclient_scm.py b/gclient_scm.py
+index 8eb8ce86..baa98ab1 100644
+--- a/gclient_scm.py
++++ b/gclient_scm.py
+@@ -1058,7 +1058,11 @@ class GitWrapper(SCMWrapper):
+             return
+ 
+         if getattr(options, 'shallow', False):
+-            depth = 10000
++            # HACK(hinoka): These repositories should be super shallow.
++            if 'flash' in mirror.url:
++                depth = 10
++            else:
++                depth = 10000
+         else:
+             depth = None
+         mirror.populate(verbose=options.verbose,
