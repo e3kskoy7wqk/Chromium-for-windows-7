@@ -1,1 +1,1 @@
-SetThreadInformation SetProcessInformation on win7
+SetThreadInformation SetProcessInformation on win7

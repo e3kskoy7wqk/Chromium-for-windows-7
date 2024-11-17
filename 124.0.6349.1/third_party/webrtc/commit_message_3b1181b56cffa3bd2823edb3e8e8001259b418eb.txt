@@ -1,1 +1,1 @@
-Disable GetDpiForMonitor on win7
+Disable GetDpiForMonitor on win7

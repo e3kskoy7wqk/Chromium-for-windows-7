@@ -1,1 +1,1 @@
-Disable CallNtPowerInformation on win7
+Disable CallNtPowerInformation on win7

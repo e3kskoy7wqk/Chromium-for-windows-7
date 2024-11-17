@@ -1,1 +1,0 @@
-Remove exception for c:\windows\fonts\* from sandbox    2024-09-25 03:09:46    f13e65d856b912b3f8d6d8e141613dc0036de805

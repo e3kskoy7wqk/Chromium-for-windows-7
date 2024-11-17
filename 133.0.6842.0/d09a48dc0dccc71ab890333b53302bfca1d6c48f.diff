@@ -1,0 +1,29 @@
+diff --git a/content/browser/font_unique_name_lookup/font_unique_name_lookup_android.h b/content/browser/font_unique_name_lookup/font_unique_name_lookup_android.h
+index 65bbce792adfc..cc808c5ff6ba5 100644
+--- a/content/browser/font_unique_name_lookup/font_unique_name_lookup_android.h
++++ b/content/browser/font_unique_name_lookup/font_unique_name_lookup_android.h
+@@ -12,6 +12,11 @@
+ #include "content/common/content_export.h"
+ #include "third_party/blink/public/mojom/font_unique_name_lookup/font_unique_name_lookup.mojom.h"
+ 
++#include <ft2build.h>
++#include FT_SYSTEM_H
++#include FT_TRUETYPE_TABLES_H
++#include FT_SFNT_NAMES_H
++
+ static_assert(BUILDFLAG(IS_ANDROID), "This implementation only works safely "
+               "on Android due to the way it assumes font files to be "
+               "read-only and unmodifiable.");
+diff --git a/third_party/blink/renderer/platform/fonts/win/font_cache_skia_win.cc b/third_party/blink/renderer/platform/fonts/win/font_cache_skia_win.cc
+index 2489ad14d51b7..7dd1f851ad8ab 100644
+--- a/third_party/blink/renderer/platform/fonts/win/font_cache_skia_win.cc
++++ b/third_party/blink/renderer/platform/fonts/win/font_cache_skia_win.cc
+@@ -31,6 +31,8 @@
+ 
+ #include <windows.h>  // For GetACP()
+ 
++#include <freetype/freetype.h>
++#include <ft2build.h>
+ #include <unicode/uscript.h>
+ 
+ #include <memory>
