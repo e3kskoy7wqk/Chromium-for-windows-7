@@ -1,0 +1,40 @@
+diff --git a/chrome/browser/chrome_process_singleton.cc b/chrome/browser/chrome_process_singleton.cc
+index 0fec769fc4469..3004fc084f99a 100644
+--- a/chrome/browser/chrome_process_singleton.cc
++++ b/chrome/browser/chrome_process_singleton.cc
+@@ -64,6 +64,12 @@ void ChromeProcessSingleton::Unlock(
+ 
+ #if BUILDFLAG(IS_WIN)
+ void ChromeProcessSingleton::InitializeFeatures() {
++  static const auto get_process_information_fn =
++      reinterpret_cast<decltype(&::GetProcessInformation)>(::GetProcAddress(
++          ::GetModuleHandle(L"Kernel32.dll"), "GetProcessInformation"));
++  static const auto set_process_information_fn =
++      reinterpret_cast<decltype(&::SetProcessInformation)>(::GetProcAddress(
++          ::GetModuleHandle(L"Kernel32.dll"), "SetProcessInformation"));
+   // On Windows, App Launch Prefetch (ALPF) will monitor the disk accesses done
+   // by processes launched, and load the resources used into memory before the
+   // process needs them, if possible. Different Chrome process types use
+@@ -86,9 +92,10 @@ void ChromeProcessSingleton::InitializeFeatures() {
+   // It is expected that this will overall improve the behavior of ALPF on
+   // Windows, which should decrease startup time for ordinary browser processes.
+   OVERRIDE_PREFETCH_PARAMETER prefetch_parameter;
+-  if ((wcsstr(::GetCommandLineW(), L"/prefetch:") == nullptr) &&
++  if (get_process_information_fn &&
++      (wcsstr(::GetCommandLineW(), L"/prefetch:") == nullptr) &&
+       is_singleton_instance_ &&
+-      GetProcessInformation(::GetCurrentProcess(),
++      get_process_information_fn(::GetCurrentProcess(),
+                             ::ProcessMaxOverridePrefetchParameter,
+                             &prefetch_parameter, sizeof(prefetch_parameter)) &&
+       prefetch_parameter.Value >=
+@@ -97,7 +104,8 @@ void ChromeProcessSingleton::InitializeFeatures() {
+       base::FeatureList::IsEnabled(features::kOverridePrefetchOnSingleton)) {
+     prefetch_parameter.Value = app_launch_prefetch::GetPrefetchBucket(
+         app_launch_prefetch::SubprocessType::kCatchAll);
+-    if (!::SetProcessInformation(
++    if (set_process_information_fn &&
++      !set_process_information_fn(
+             ::GetCurrentProcess(), ::ProcessOverrideSubsequentPrefetchParameter,
+             &prefetch_parameter, sizeof(prefetch_parameter))) {
+       // This is not fatal because it is an optimization and has no bearing on

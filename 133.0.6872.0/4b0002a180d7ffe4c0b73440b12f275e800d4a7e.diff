@@ -1,0 +1,43 @@
+
+
+diff --git a/base/process/process_win.cc b/base/process/process_win.cc
+index 9a414d886f779..30bf9ba0b379e 100644
+--- a/base/process/process_win.cc
++++ b/base/process/process_win.cc
+@@ -266,13 +266,17 @@ Process::Priority Process::GetPriority() const {
+     return Priority::kBestEffort;
+   }
+ 
++  static const auto get_process_information_fn =
++      reinterpret_cast<decltype(&::GetProcessInformation)>(::GetProcAddress(
++          ::GetModuleHandle(L"Kernel32.dll"), "GetProcessInformation"));
+   PROCESS_POWER_THROTTLING_STATE power_throttling = {
+       .Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+       .ControlMask = 0ul,
+       .StateMask = 0ul,
+   };
+   const bool ret =
+-      ::GetProcessInformation(Handle(), ProcessPowerThrottling,
++      get_process_information_fn != 0 &&
++      get_process_information_fn(Handle(), ProcessPowerThrottling,
+                               &power_throttling, sizeof(power_throttling));
+ 
+   // Return Priority::kUserVisible if EcoQoS read & write supported and level
+@@ -270,5 +270,8 @@ bool Process::SetPriority(Priority priority) {
+                                    ? IDLE_PRIORITY_CLASS
+                                    : NORMAL_PRIORITY_CLASS;
+ 
++  static const auto set_process_information_fn =
++      reinterpret_cast<decltype(&::SetProcessInformation)>(::GetProcAddress(
++          ::GetModuleHandle(L"Kernel32.dll"), "SetProcessInformation"));
+   auto* os_info = base::win::OSInfo::GetInstance();
+   if (os_info->version() >= win::Version::WIN11) {
+@@ -287,7 +290,7 @@ bool Process::SetPriority(Priority priority) {
+       power_throttling.StateMask = 0;
+     }
+     bool ret =
+-        ::SetProcessInformation(Handle(), ProcessPowerThrottling,
++        set_process_information_fn(Handle(), ProcessPowerThrottling,
+                                 &power_throttling, sizeof(power_throttling));
+     if (ret == 0) {
+       DPLOG(ERROR) << "Setting process QoS policy fails";
