@@ -2,7 +2,7 @@
 
 Chromium is an open-source browser project that aims to build a safer, faster, and more stable way for all users to experience the web.
 
-The latest version of Chromium no longer supports Windows 7. However, many of my friends are still using Windows 7 and they wish to use the latest version of Chromium on it. Therefore, I have created patches for Chromium versions 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133 and 134 to enable the browser to run on Windows 7.
+Chrome 109 is the last version to support Windows 7. This repository includes patches that enable Chromium to run on Windows 7 beyond the official end-of-support date, allowing users to continue using the latest features and improvements from the Chromium project.
 
 ## Platform Support
 
