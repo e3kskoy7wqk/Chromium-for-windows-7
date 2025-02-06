@@ -1,0 +1,26 @@
+diff --git a/chrome/browser/chrome_process_singleton.cc b/chrome/browser/chrome_process_singleton.cc
+index 166dd7356abec..8d1bff5e84a06 100644
+--- a/chrome/browser/chrome_process_singleton.cc
++++ b/chrome/browser/chrome_process_singleton.cc
+@@ -82,7 +82,11 @@ void ChromeProcessSingleton::InitializeFeatures() {
+   //
+   // It is expected that this will overall improve the behavior of ALPF on
+   // Windows, which should decrease startup time for ordinary browser processes.
+-  if (is_singleton_instance_ &&
++  static const auto set_process_information_fn =
++      reinterpret_cast<decltype(&::SetProcessInformation)>(::GetProcAddress(
++          ::GetModuleHandle(L"Kernel32.dll"), "SetProcessInformation"));
++  if (set_process_information_fn &&
++      is_singleton_instance_ &&
+       (wcsstr(::GetCommandLineW(), L"/prefetch:") == nullptr) &&
+       base::FeatureList::IsEnabled(features::kOverridePrefetchOnSingleton)) {
+     OVERRIDE_PREFETCH_PARAMETER prefetch_parameter = {};
+@@ -94,7 +98,7 @@ void ChromeProcessSingleton::InitializeFeatures() {
+     // ERROR_INTERNAL_ERROR.
+     base::UmaHistogramSparse(
+         "Startup.PrefetchOverrideErrorCode",
+-        ::SetProcessInformation(::GetCurrentProcess(),
++        set_process_information_fn(::GetCurrentProcess(),
+                                 ::ProcessOverrideSubsequentPrefetchParameter,
+                                 &prefetch_parameter, sizeof(prefetch_parameter))
+             ? ERROR_SUCCESS
