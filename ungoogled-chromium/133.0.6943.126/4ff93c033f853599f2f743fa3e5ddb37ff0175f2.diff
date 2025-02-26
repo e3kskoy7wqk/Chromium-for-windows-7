@@ -1,0 +1,75 @@
+
+
+diff --git a/sandbox/win/src/handle_closer_agent.cc b/sandbox/win/src/handle_closer_agent.cc
+index a4cb9e8d6aa12..87347016804d4 100644
+--- a/sandbox/win/src/handle_closer_agent.cc
++++ b/sandbox/win/src/handle_closer_agent.cc
+@@ -166,22 +166,54 @@ bool HandleCloserAgent::CloseHandles() {
+   NTSTATUS status = GetNtExports()->QueryInformationProcess(
+       ::GetCurrentProcess(), static_cast<PROCESSINFOCLASS>(ProcessHandleTable),
+       buffer.data(), static_cast<ULONG>(buffer.size()), &return_length);
++  DWORD dwError = GetLastErrorFromNtStatus(status);
++  if (!NT_SUCCESS(status) && dwError == ERROR_INVALID_PARAMETER)
++  {
++      handle_count = UINT_MAX;
++      const int kInvalidHandleThreshold = 100;
++      const size_t kHandleOffset = 4;  // Handles are always a multiple of 4.
++
++      if (!::GetProcessHandleCount(::GetCurrentProcess(), &handle_count))
++        return false;
++
++      uint32_t handle_value = 0;
++      int invalid_count = 0;
++
++      // Keep incrementing until we hit the number of handles reported by
++      // GetProcessHandleCount(). If we hit a very long sequence of invalid
++      // handles we assume that we've run past the end of the table.
++      while (handle_count && invalid_count < kInvalidHandleThreshold) {
++        handle_value = kHandleOffset;
++        HANDLE handle = base::win::Uint32ToHandle(handle_value);
++        auto type_name = GetTypeNameFromHandle(handle);
++        if (!type_name) {
++          ++invalid_count;
++          continue;
++        }
+ 
+-  if (!NT_SUCCESS(status)) {
+-    ::SetLastError(GetLastErrorFromNtStatus(status));
+-    return false;
++        --handle_count;
++        MaybeCloseHandle(type_name.value(), handle);
++      }
+   }
+-  DCHECK(buffer.size() >= return_length);
+-  DCHECK((buffer.size() % sizeof(uint32_t)) == 0);
+-
+-  base::span<uint32_t> handle_values(reinterpret_cast<uint32_t*>(buffer.data()),
+-                                     return_length / sizeof(uint32_t));
+-  for (uint32_t handle_value : handle_values) {
+-    HANDLE handle = base::win::Uint32ToHandle(handle_value);
+-    auto type_name = GetTypeNameFromHandle(handle);
+-    if (type_name) {
+-      MaybeCloseHandle(type_name.value(), handle);
+-    }
++  else if (NT_SUCCESS(status))
++  {
++      DCHECK(buffer.size() >= return_length);
++      DCHECK((buffer.size() % sizeof(uint32_t)) == 0);
++
++      base::span<uint32_t> handle_values(reinterpret_cast<uint32_t*>(buffer.data()),
++                                         return_length / sizeof(uint32_t));
++      for (uint32_t handle_value : handle_values) {
++        HANDLE handle = base::win::Uint32ToHandle(handle_value);
++        auto type_name = GetTypeNameFromHandle(handle);
++        if (type_name) {
++          MaybeCloseHandle(type_name.value(), handle);
++        }
++      }
++  }
++  else
++  {
++      ::SetLastError(GetLastErrorFromNtStatus(status));
++      return false;
+   }
+ 
+   return true;

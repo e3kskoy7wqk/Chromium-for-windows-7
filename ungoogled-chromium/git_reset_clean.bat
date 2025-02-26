@@ -118,6 +118,7 @@ git -C third_party/nearby/src checkout .
 git -C third_party/beto-core/src checkout .
 git -C third_party/securemessage/src checkout .
 git -C third_party/speedometer/v3.0 checkout .
+git -C third_party/speedometer/main checkout .
 git -C third_party/ukey2/src checkout .
 git -C third_party/cros-components/src checkout .
 git -C third_party/libdrm/src checkout .
@@ -378,6 +379,7 @@ git -C third_party/nearby/src clean -df
 git -C third_party/beto-core/src clean -df
 git -C third_party/securemessage/src clean -df
 git -C third_party/speedometer/v3.0 clean -df
+git -C third_party/speedometer/main clean -df
 git -C third_party/ukey2/src clean -df
 git -C third_party/cros-components/src clean -df
 git -C third_party/libdrm/src clean -df

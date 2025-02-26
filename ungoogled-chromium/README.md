@@ -37,10 +37,12 @@ Open a command prompt and
    xcopy /s /f /h %CHROMIUM%\third_party\rust\* %_ROOT_DIR%\TempDir\third_party\rust\
    xcopy /s /f /h %CHROMIUM%\third_party\rust-toolchain\* %_ROOT_DIR%\TempDir\third_party\rust-toolchain\
    xcopy /s /f /h %CHROMIUM%\third_party\llvm-build\* %_ROOT_DIR%\TempDir\third_party\llvm-build\
-   xcopy /s /f /h %CHROMIUM%\third_party\win_build_output\midl\chrome\updater\app\server\win\x64\updater_legacy_idl.tlb %_ROOT_DIR%\TempDir\third_party\win_build_output\midl\chrome\updater\app\server\win\x64\updater_legacy_idl.tlb
-   xcopy /s /f /h %CHROMIUM%\third_party\win_build_output\midl\chrome\updater\app\server\win\x64\updater_idl.tlb %_ROOT_DIR%\TempDir\third_party\win_build_output\midl\chrome\updater\app\server\win\x64\updater_idl.tlb
-   xcopy /s /f /h %CHROMIUM%\third_party\win_build_output\midl\chrome\updater\app\server\win\x86\updater_legacy_idl.tlb %_ROOT_DIR%\TempDir\third_party\win_build_output\midl\chrome\updater\app\server\win\x86\updater_legacy_idl.tlb
-   xcopy /s /f /h %CHROMIUM%\third_party\win_build_output\midl\chrome\updater\app\server\win\x86\updater_idl.tlb %_ROOT_DIR%\TempDir\third_party\win_build_output\midl\chrome\updater\app\server\win\x86\updater_idl.tlb
+   mkdir %_ROOT_DIR%\TempDir\third_party\win_build_output\midl\chrome\updater\app\server\win\x64
+   mkdir %_ROOT_DIR%\TempDir\third_party\win_build_output\midl\chrome\updater\app\server\win\x86
+   copy /Y %CHROMIUM%\third_party\win_build_output\midl\chrome\updater\app\server\win\x64\updater_legacy_idl.tlb %_ROOT_DIR%\TempDir\third_party\win_build_output\midl\chrome\updater\app\server\win\x64\updater_legacy_idl.tlb
+   copy /Y %CHROMIUM%\third_party\win_build_output\midl\chrome\updater\app\server\win\x64\updater_idl.tlb %_ROOT_DIR%\TempDir\third_party\win_build_output\midl\chrome\updater\app\server\win\x64\updater_idl.tlb
+   copy /Y %CHROMIUM%\third_party\win_build_output\midl\chrome\updater\app\server\win\x86\updater_legacy_idl.tlb %_ROOT_DIR%\TempDir\third_party\win_build_output\midl\chrome\updater\app\server\win\x86\updater_legacy_idl.tlb
+   copy /Y %CHROMIUM%\third_party\win_build_output\midl\chrome\updater\app\server\win\x86\updater_idl.tlb %_ROOT_DIR%\TempDir\third_party\win_build_output\midl\chrome\updater\app\server\win\x86\updater_idl.tlb
    ```
 
 4. Retrieve windows downloads
