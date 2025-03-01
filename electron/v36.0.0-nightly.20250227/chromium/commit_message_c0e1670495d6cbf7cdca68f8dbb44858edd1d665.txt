@@ -1,1 +1,0 @@
-win7dep: Make installer/updater fail pre win10.    2023-01-06 01:21:46    9c677bc699ff7bf2f6e225ca52452a24a9a4eebb

@@ -1,1 +1,0 @@
-Refactor ElevationIconSetter to use templated callback and make PassKey public

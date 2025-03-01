@@ -1,1 +1,0 @@
-Reland "Get DeviceScaleFactor for the captured monitor/screen"    2025-01-31 20:56:30    c58a767a23ab620a78fd92aa9d869881ba8afd25
