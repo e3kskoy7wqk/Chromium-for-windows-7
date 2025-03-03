@@ -1,0 +1,30 @@
+diff --git a/components/text_recognition/browser/text_recognition_win.cc b/components/text_recognition/browser/text_recognition_win.cc
+index cbf9f8ab90d..a0859c052b5 100644
+--- a/components/text_recognition/browser/text_recognition_win.cc
++++ b/components/text_recognition/browser/text_recognition_win.cc
+@@ -49,6 +49,12 @@ bool GetTextFromImage(const std::string& language_code,
+   base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
+                                                 base::BlockingType::WILL_BLOCK);
+ 
++  // Loads functions dynamically at runtime to prevent library dependencies.
++  if (!base::win::ResolveCoreWinRTDelayload()) {
++    VLOG(2) << "Failed loading functions from combase.dll";
++    return;
++  }
++
+   ComPtr<IOcrEngineStatics> engine_factory;
+   HRESULT hr = GetActivationFactory<IOcrEngineStatics,
+                                     RuntimeClass_Windows_Media_Ocr_OcrEngine>(
+@@ -136,6 +142,12 @@ std::vector<std::string> GetAvailableRecognizerLanguages() {
+   base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
+                                                 base::BlockingType::WILL_BLOCK);
+ 
++  // Loads functions dynamically at runtime to prevent library dependencies.
++  if (!base::win::ResolveCoreWinRTDelayload()) {
++    VLOG(2) << "Failed loading functions from combase.dll";
++    return {};
++  }
++
+   ComPtr<IOcrEngineStatics> engine_factory;
+   HRESULT hr = GetActivationFactory<IOcrEngineStatics,
+                                     RuntimeClass_Windows_Media_Ocr_OcrEngine>(

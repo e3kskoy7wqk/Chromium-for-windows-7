@@ -1,0 +1,24 @@
+
+
+diff --git a/chrome/browser/ui/webui/conflicts/conflicts_data_fetcher.cc b/chrome/browser/ui/webui/conflicts/conflicts_data_fetcher.cc
+index f8342a344c72e..dcff65191e16a 100644
+--- a/chrome/browser/ui/webui/conflicts/conflicts_data_fetcher.cc
++++ b/chrome/browser/ui/webui/conflicts/conflicts_data_fetcher.cc
+@@ -221,6 +221,8 @@ std::string GetModuleStatusString(
+ enum ThirdPartyFeaturesStatus {
+   // The third-party features are not available in non-Google Chrome builds.
+   kNonGoogleChromeBuild,
++  // The third-party features are not available on Windows 7.
++  kNotAvailableWin7,
+   // The ThirdPartyBlockingEnabled group policy is disabled.
+   kPolicyDisabled,
+   // Both the IncompatibleApplicationsWarning and the
+@@ -292,6 +294,8 @@ std::string GetThirdPartyFeaturesStatusString(ThirdPartyFeaturesStatus status) {
+     case ThirdPartyFeaturesStatus::kNonGoogleChromeBuild:
+       return "The third-party features are not available in non-Google Chrome "
+              "builds.";
++    case ThirdPartyFeaturesStatus::kNotAvailableWin7:
++      return "The third-party features are not available on Windows 7.";
+     case ThirdPartyFeaturesStatus::kPolicyDisabled:
+       return "The ThirdPartyBlockingEnabled group policy is disabled.";
+     case ThirdPartyFeaturesStatus::kFeatureDisabled:

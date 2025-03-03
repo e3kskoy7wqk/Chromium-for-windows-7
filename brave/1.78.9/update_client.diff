@@ -1,0 +1,683 @@
+diff --git a/components/update_client/background_downloader_mac_unittest.cc b/components/update_client/background_downloader_mac_unittest.cc
+index 151cbed820a36..24de744609e87 100644
+--- a/components/update_client/background_downloader_mac_unittest.cc
++++ b/components/update_client/background_downloader_mac_unittest.cc
+@@ -168,7 +168,7 @@ class BackgroundDownloaderTest : public testing::Test {
+ 
+  private:
+   std::unique_ptr<HttpResponse> HandleRequest(const HttpRequest& request) {
+-    CHECK(request_handler_) << "Request handler not configured for test";
++    DCHECK(request_handler_) << "Request handler not configured for test";
+     return request_handler_.Run(request);
+   }
+ 
+@@ -542,7 +542,7 @@ class BackgroundDownloaderCrashingClientTest : public testing::Test {
+ 
+  private:
+   std::unique_ptr<HttpResponse> HandleRequest(const HttpRequest& request) {
+-    CHECK(request_handler_) << "Request handler not configured for test";
++    DCHECK(request_handler_) << "Request handler not configured for test";
+     return request_handler_.Run(request);
+   }
+ 
+@@ -578,7 +578,7 @@ TEST_F(BackgroundDownloaderCrashingClientTest, DISABLED_ClientCrash) {
+         } else {
+           return base::WrapUnique<HttpResponse>(
+               new InterruptedHttpResponse(base::BindLambdaForTesting([&] {
+-                CHECK(test_child_process.IsValid());
++                DCHECK(test_child_process.IsValid());
+                 // Terminate the child process with extreme prejudice. SIGKILL
+                 // is used to prevent the client from cleaning up.
+                 kill(test_child_process.Handle(), SIGKILL);
+@@ -608,11 +608,11 @@ TEST_F(BackgroundDownloaderCrashingClientTest, DISABLED_ClientCrash) {
+ }
+ 
+ MULTIPROCESS_TEST_MAIN(CrashingDownloadClient) {
+-  CHECK(base::CommandLine::ForCurrentProcess()->HasSwitch(
++  DCHECK(base::CommandLine::ForCurrentProcess()->HasSwitch(
+       kDownloadUrlSwitchName));
+   const GURL url(base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+       kDownloadUrlSwitchName));
+-  CHECK(base::CommandLine::ForCurrentProcess()->HasSwitch(
++  DCHECK(base::CommandLine::ForCurrentProcess()->HasSwitch(
+       kDownloadSessionIdSwitchName));
+   const std::string download_session_id =
+       base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+diff --git a/components/update_client/background_downloader_win.cc b/components/update_client/background_downloader_win.cc
+index 378d2d355ba46..e7afcfa686e71 100644
+--- a/components/update_client/background_downloader_win.cc
++++ b/components/update_client/background_downloader_win.cc
+@@ -625,7 +625,7 @@ bool BackgroundDownloader::OnStateError() {
+   if (FAILED(hr)) {
+     error_code = hr;
+   }
+-  CHECK(FAILED(error_code));
++  DCHECK(FAILED(error_code));
+   EndDownload(error_code);
+   return true;
+ }
+@@ -845,7 +845,7 @@ HRESULT BackgroundDownloader::CompleteJob() {
+   // Check the post-conditions of a successful download, including the file and
+   // job invariants. The byte counts for a job and its file must match as a job
+   // only contains one file.
+-  CHECK(progress.Completed);
++  DCHECK(progress.Completed);
+   CHECK_EQ(progress.BytesTotal, progress.BytesTransferred);
+ 
+   response_ = base::FilePath(local_name);
+@@ -857,7 +857,7 @@ HRESULT BackgroundDownloader::GetBackgroundDownloaderJobCount(
+     size_t* num_jobs) {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(com_sequence_checker_);
+   CheckIsMta();
+-  CHECK(bits_manager_);
++  DCHECK(bits_manager_);
+ 
+   std::vector<Microsoft::WRL::ComPtr<IBackgroundCopyJob>> jobs;
+   const HRESULT hr = FindBitsJobIf(
+@@ -874,7 +874,7 @@ HRESULT BackgroundDownloader::GetBackgroundDownloaderJobCount(
+ void BackgroundDownloader::CleanupStaleJobs() {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(com_sequence_checker_);
+   CheckIsMta();
+-  CHECK(bits_manager_);
++  DCHECK(bits_manager_);
+ 
+   static base::Time last_sweep;
+ 
+diff --git a/components/update_client/component.cc b/components/update_client/component.cc
+index 1b8db60e198dd..b5f70aa66aed4 100644
+--- a/components/update_client/component.cc
++++ b/components/update_client/component.cc
+@@ -57,7 +57,7 @@ Component::Component(const UpdateContext& update_context, const std::string& id)
+     : id_(id),
+       state_(std::make_unique<StateNew>(this)),
+       update_context_(update_context) {
+-  CHECK(!id_.empty());
++  DCHECK(!id_.empty());
+ }
+ 
+ Component::~Component() = default;
+@@ -76,7 +76,7 @@ bool Component::is_foreground() const {
+ 
+ void Component::Handle(CallbackHandleComplete callback_handle_complete) {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+-  CHECK(state_);
++  DCHECK(state_);
+ 
+   callback_handle_complete_ = std::move(callback_handle_complete);
+ 
+@@ -100,7 +100,7 @@ void Component::ChangeState(std::unique_ptr<State> next_state) {
+ CrxUpdateItem Component::GetCrxUpdateItem() const {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+ 
+-  CHECK(!id_.empty());
++  DCHECK(!id_.empty());
+ 
+   CrxUpdateItem crx_update_item;
+   crx_update_item.state = state_->state();
+@@ -143,7 +143,7 @@ void Component::SetUpdateCheckResult(
+   error_code_ = error;
+ 
+   if (result) {
+-    CHECK(crx_component_);
++    DCHECK(crx_component_);
+     custom_attrs_ = result->custom_attributes;
+     if (!result->manifest.packages.empty()) {
+       next_version_ = base::Version(result->manifest.version);
+@@ -322,7 +322,7 @@ void Component::State::Handle(CallbackNextState callback_next_state) {
+ 
+ void Component::State::TransitionState(std::unique_ptr<State> next_state) {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+-  CHECK(next_state);
++  DCHECK(next_state);
+ 
+   base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+       FROM_HERE,
+@@ -382,7 +382,7 @@ void Component::StateChecking::DoHandle() {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+ 
+   auto& component = State::component();
+-  CHECK(component.crx_component());
++  DCHECK(component.crx_component());
+ 
+   if (component.error_code_) {
+     metrics::RecordUpdateCheckResult(metrics::UpdateCheckResult::kError);
+@@ -449,7 +449,7 @@ void Component::StateCanUpdate::DoHandle() {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+ 
+   auto& component = State::component();
+-  CHECK(component.crx_component());
++  DCHECK(component.crx_component());
+ 
+   component.is_update_available_ = true;
+   component.NotifyObservers();
+@@ -497,7 +497,7 @@ void Component::StateUpToDate::DoHandle() {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+ 
+   auto& component = State::component();
+-  CHECK(component.crx_component());
++  DCHECK(component.crx_component());
+ 
+   component.NotifyObservers();
+   EndState();
+@@ -538,7 +538,7 @@ void Component::StateUpdating::PipelineComplete(
+     component.extra_code1_ = result.extra_;
+   }
+ 
+-  CHECK(component.crx_component_);
++  DCHECK(component.crx_component_);
+   if (!component.crx_component_->allow_cached_copies) {
+     component.update_context_->crx_cache_->RemoveAll(
+         component.crx_component()->app_id);
+@@ -566,7 +566,7 @@ void Component::StateUpdated::DoHandle() {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+ 
+   auto& component = State::component();
+-  CHECK(component.crx_component());
++  DCHECK(component.crx_component());
+ 
+   component.crx_component_->version = component.next_version_;
+   component.crx_component_->fingerprint = component.next_fp_;
+diff --git a/components/update_client/crx_cache.cc b/components/update_client/crx_cache.cc
+index efa9225722aae..d4c508e32ad87 100644
+--- a/components/update_client/crx_cache.cc
++++ b/components/update_client/crx_cache.cc
+@@ -54,7 +54,7 @@ CrxCache::~CrxCache() = default;
+ 
+ base::FilePath CrxCache::BuildCrxFilePath(const std::string& id,
+                                           const std::string& fp) {
+-  CHECK(crx_cache_root_path_);
++  DCHECK(crx_cache_root_path_);
+   return crx_cache_root_path_->AppendASCII(base::JoinString({id, fp}, "_"));
+ }
+ 
+diff --git a/components/update_client/crx_downloader.cc b/components/update_client/crx_downloader.cc
+index 8a8ae9ad9e001..0eb95545a0245 100644
+--- a/components/update_client/crx_downloader.cc
++++ b/components/update_client/crx_downloader.cc
+@@ -112,7 +112,7 @@ void CrxDownloader::OnDownloadComplete(
+   }
+ 
+   CHECK_EQ(0, download_metrics.error);
+-  CHECK(is_handled);
++  DCHECK(is_handled);
+ 
+   base::ThreadPool::PostTaskAndReplyWithResult(
+       FROM_HERE, kTaskTraits,
+@@ -169,7 +169,7 @@ void CrxDownloader::HandleDownloadError(
+     const DownloadMetrics& download_metrics) {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+   CHECK_NE(0, result.error);
+-  CHECK(result.response.empty());
++  DCHECK(result.response.empty());
+   CHECK_NE(0, download_metrics.error);
+ 
+   download_metrics_.push_back(download_metrics);
+diff --git a/components/update_client/net/network_impl.cc b/components/update_client/net/network_impl.cc
+index e5a61b5f42741..d2c21da2dd360 100644
+--- a/components/update_client/net/network_impl.cc
++++ b/components/update_client/net/network_impl.cc
+@@ -67,7 +67,7 @@ const net::NetworkTrafficAnnotationTag traffic_annotation =
+ // if multiple instances of the same header are present.
+ std::string GetStringHeader(const network::SimpleURLLoader* simple_url_loader,
+                             const char* header_name) {
+-  CHECK(simple_url_loader);
++  DCHECK(simple_url_loader);
+ 
+   const auto* response_info = simple_url_loader->ResponseInfo();
+   if (!response_info || !response_info->headers) {
+@@ -85,7 +85,7 @@ std::string GetStringHeader(const network::SimpleURLLoader* simple_url_loader,
+ // if the header is not available or a conversion error has occured.
+ int64_t GetInt64Header(const network::SimpleURLLoader* simple_url_loader,
+                        const char* header_name) {
+-  CHECK(simple_url_loader);
++  DCHECK(simple_url_loader);
+ 
+   const auto* response_info = simple_url_loader->ResponseInfo();
+   if (!response_info || !response_info->headers) {
+diff --git a/components/update_client/net/url_loader_post_interceptor.cc b/components/update_client/net/url_loader_post_interceptor.cc
+index d516eef194d81..cb4c57fb3e9f0 100644
+--- a/components/update_client/net/url_loader_post_interceptor.cc
++++ b/components/update_client/net/url_loader_post_interceptor.cc
+@@ -158,7 +158,7 @@ int URLLoaderPostInterceptor::GetHitCountForURL(const GURL& url) {
+ }
+ 
+ void URLLoaderPostInterceptor::InitializeWithInterceptor() {
+-  CHECK(url_loader_factory_);
++  DCHECK(url_loader_factory_);
+   url_loader_factory_->SetInterceptor(
+       base::BindLambdaForTesting([&](const network::ResourceRequest& request) {
+         GURL url = request.url;
+@@ -199,8 +199,8 @@ void URLLoaderPostInterceptor::InitializeWithInterceptor() {
+ }
+ 
+ void URLLoaderPostInterceptor::InitializeWithRequestHandler() {
+-  CHECK(embedded_test_server_);
+-  CHECK(!url_loader_factory_);
++  DCHECK(embedded_test_server_);
++  DCHECK(!url_loader_factory_);
+   embedded_test_server_->RegisterRequestHandler(base::BindRepeating(
+       &URLLoaderPostInterceptor::RequestHandler, base::Unretained(this)));
+ }
+diff --git a/components/update_client/op_download.cc b/components/update_client/op_download.cc
+index 12ada2946ca84..1fe7c66dd8b70 100644
+--- a/components/update_client/op_download.cc
++++ b/components/update_client/op_download.cc
+@@ -119,7 +119,7 @@ void DownloadComplete(
+   }
+ 
+   if (download_result.error) {
+-    CHECK(download_result.response.empty());
++    DCHECK(download_result.response.empty());
+     base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+         FROM_HERE,
+         base::BindOnce(std::move(callback),
+diff --git a/components/update_client/persisted_data.cc b/components/update_client/persisted_data.cc
+index 5ff802100ba29..3d2550aa81408 100644
+--- a/components/update_client/persisted_data.cc
++++ b/components/update_client/persisted_data.cc
+@@ -134,7 +134,7 @@ PersistedDataImpl::PersistedDataImpl(
+     : pref_service_provider_(pref_service_provider),
+       activity_data_service_(std::move(activity_data_service)) {
+   PrefService* prefs = pref_service_provider_.Run();
+-  CHECK(!prefs || prefs->FindPreference(kPersistedDataPreference));
++  DCHECK(!prefs || prefs->FindPreference(kPersistedDataPreference));
+ }
+ 
+ PersistedDataImpl::~PersistedDataImpl() {
+@@ -377,7 +377,7 @@ base::Version PersistedDataImpl::GetProductVersion(
+ 
+ void PersistedDataImpl::SetProductVersion(const std::string& id,
+                                           const base::Version& pv) {
+-  CHECK(pv.IsValid());
++  DCHECK(pv.IsValid());
+   SetString(id, "pv", pv.GetString());
+ }
+ 
+@@ -389,7 +389,7 @@ base::Version PersistedDataImpl::GetMaxPreviousProductVersion(
+ void PersistedDataImpl::SetMaxPreviousProductVersion(
+     const std::string& id,
+     const base::Version& max_version) {
+-  CHECK(max_version.IsValid());
++  DCHECK(max_version.IsValid());
+   auto existing_max = GetMaxPreviousProductVersion(id);
+   if (!existing_max.IsValid() || max_version > existing_max) {
+     SetString(id, "max_pv", max_version.GetString());
+diff --git a/components/update_client/pipeline.cc b/components/update_client/pipeline.cc
+index 764b8a4108174..6c01d38b2f296 100644
+--- a/components/update_client/pipeline.cc
++++ b/components/update_client/pipeline.cc
+@@ -108,7 +108,7 @@ Pipeline::Pipeline(
+ 
+ base::OnceClosure Pipeline::Start(
+     base::OnceCallback<void(const CategorizedError&)> callback) {
+-  CHECK(!callback_);
++  DCHECK(!callback_);
+   callback_ = std::move(callback);
+   StartNext(first_path_);
+   return base::BindOnce(&Cancellation::Cancel, cancel_);
+@@ -200,7 +200,7 @@ void AssemblePipeline(
+ 
+   if (download_diff && prev_installer.has_value()) {
+     // Do a differential update that falls back to a full update.
+-    CHECK(patch_diff);
++    DCHECK(patch_diff);
+     std::queue<Operation> ops;
+     ops.push(std::move(*download_diff));
+     ops.push(std::move(*patch_diff));
+diff --git a/components/update_client/protocol_parser_json.cc b/components/update_client/protocol_parser_json.cc
+index bb4a1e13e2bf0..9f5eebd54f030 100644
+--- a/components/update_client/protocol_parser_json.cc
++++ b/components/update_client/protocol_parser_json.cc
+@@ -288,7 +288,7 @@ bool ParseApp(const base::Value& app_node_val,
+     }
+   }
+ 
+-  CHECK(result->status.empty() || result->status == "ok");
++  DCHECK(result->status.empty() || result->status == "ok");
+ 
+   if (const base::Value::List* data_node = app_node.FindList("data")) {
+     std::ranges::for_each(*data_node, [&result](const base::Value& data) {
+@@ -309,7 +309,7 @@ bool ParseApp(const base::Value& app_node_val,
+ 
+ bool ProtocolParserJSON::DoParse(const std::string& response_json,
+                                  Results* results) {
+-  CHECK(results);
++  DCHECK(results);
+ 
+   if (response_json.empty()) {
+     ParseError("Empty JSON.");
+diff --git a/components/update_client/protocol_serializer.cc b/components/update_client/protocol_serializer.cc
+index 7b1e0761ebc16..b504c09716bb1 100644
+--- a/components/update_client/protocol_serializer.cc
++++ b/components/update_client/protocol_serializer.cc
+@@ -117,9 +117,9 @@ protocol_request::Request MakeProtocolRequest(
+   request.is_machine = is_machine;
+ 
+   // Session id and request id.
+-  CHECK(!session_id.empty());
+-  CHECK(base::StartsWith(session_id, "{", base::CompareCase::SENSITIVE));
+-  CHECK(base::EndsWith(session_id, "}", base::CompareCase::SENSITIVE));
++  DCHECK(!session_id.empty());
++  DCHECK(base::StartsWith(session_id, "{", base::CompareCase::SENSITIVE));
++  DCHECK(base::EndsWith(session_id, "}", base::CompareCase::SENSITIVE));
+   request.session_id = session_id;
+   request.request_id = base::StrCat(
+       {"{", base::Uuid::GenerateRandomV4().AsLowercaseString(), "}"});
+@@ -173,12 +173,12 @@ protocol_request::Request MakeProtocolRequest(
+     }
+     it = updater_state_attributes.find("ismachine");
+     if (it != updater_state_attributes.end()) {
+-      CHECK(it->second == "0" || it->second == "1");
++      DCHECK(it->second == "0" || it->second == "1");
+       request.updater->is_machine = it->second != "0";
+     }
+     it = updater_state_attributes.find("autoupdatecheckenabled");
+     if (it != updater_state_attributes.end()) {
+-      CHECK(it->second == "0" || it->second == "1");
++      DCHECK(it->second == "0" || it->second == "1");
+       request.updater->autoupdate_check_enabled = it->second != "0";
+     }
+     it = updater_state_attributes.find("laststarted");
+@@ -270,7 +270,7 @@ protocol_request::UpdateCheck MakeProtocolUpdateCheck(
+ protocol_request::Ping MakeProtocolPing(const std::string& app_id,
+                                         const PersistedData* metadata,
+                                         bool active) {
+-  CHECK(metadata);
++  DCHECK(metadata);
+   protocol_request::Ping ping;
+ 
+   if (active) {
+diff --git a/components/update_client/protocol_serializer_fuzzer.cc b/components/update_client/protocol_serializer_fuzzer.cc
+index 3b64c569db571..ccbb8001d4429 100644
+--- a/components/update_client/protocol_serializer_fuzzer.cc
++++ b/components/update_client/protocol_serializer_fuzzer.cc
+@@ -22,7 +22,7 @@
+ #include "components/update_client/protocol_handler.h"
+ 
+ struct Environment {
+-  Environment() { CHECK(base::CommandLine::Init(0, nullptr)); }
++  Environment() { DCHECK(base::CommandLine::Init(0, nullptr)); }
+ };
+ 
+ namespace update_client {
+@@ -54,7 +54,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
+   std::string request_serialized = serializer->Serialize(request);
+ 
+   // Any request we serialize should be valid JSON.
+-  CHECK(base::JSONReader::Read(request_serialized));
++  DCHECK(base::JSONReader::Read(request_serialized));
+   return 0;
+ }
+ }  // namespace update_client
+diff --git a/components/update_client/protocol_serializer_json.cc b/components/update_client/protocol_serializer_json.cc
+index d77b17f73f163..aab11ddcee640 100644
+--- a/components/update_client/protocol_serializer_json.cc
++++ b/components/update_client/protocol_serializer_json.cc
+@@ -234,7 +234,7 @@ std::string ProtocolSerializerJSON::Serialize(
+     if (app.events) {
+       base::Value::List event_nodes;
+       for (const auto& event : *app.events) {
+-        CHECK(!event.empty());
++        DCHECK(!event.empty());
+         event_nodes.Append(event.Clone());
+       }
+       app_node.Set("event", std::move(event_nodes));
+diff --git a/components/update_client/request_sender.cc b/components/update_client/request_sender.cc
+index 52dbca8b7f3b9..5e26c2780faf9 100644
+--- a/components/update_client/request_sender.cc
++++ b/components/update_client/request_sender.cc
+@@ -88,15 +88,15 @@ base::OnceClosure RequestSender::Send(
+ }
+ 
+ void RequestSender::SendInternal() {
+-  CHECK(cur_url_ != urls_.end());
+-  CHECK(cur_url_->is_valid());
++  DCHECK(cur_url_ != urls_.end());
++  DCHECK(cur_url_->is_valid());
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+ 
+   GURL url(*cur_url_);
+   VLOG(2) << "url: " << url.spec();
+ 
+   if (use_signing_) {
+-    CHECK(!public_key_.empty());
++    DCHECK(!public_key_.empty());
+     signer_ = client_update_protocol::Ecdsa::Create(kKeyVersion, public_key_);
+     std::string request_query_string;
+     signer_->SignRequest(request_body_, &request_query_string);
+@@ -145,8 +145,8 @@ void RequestSender::SendInternalComplete(
+       return;
+     }
+ 
+-    CHECK(use_signing_);
+-    CHECK(signer_);
++    DCHECK(use_signing_);
++    DCHECK(signer_);
+     if (signer_->ValidateResponse(
+             response_body,
+             SelectCupServerProof(response_cup_server_proof, response_etag))) {
+@@ -159,7 +159,7 @@ void RequestSender::SendInternalComplete(
+     error = static_cast<int>(ProtocolError::RESPONSE_NOT_TRUSTED);
+   }
+ 
+-  CHECK(error);
++  DCHECK(error);
+ 
+   // A positive |retry_after_sec| is a hint from the server that the client
+   // should not send further request until the cooldown has expired.
+diff --git a/components/update_client/update_checker.cc b/components/update_client/update_checker.cc
+index 7f5455a9b3803..2562812fcf313 100644
+--- a/components/update_client/update_checker.cc
++++ b/components/update_client/update_checker.cc
+@@ -162,10 +162,10 @@ void UpdateCheckerImpl::CheckForUpdatesHelper(
+   // Components in this update check are either all foreground, or all
+   // background since this member is inherited from the component's update
+   // context. Pick the state of the first component to use in the update check.
+-  CHECK(!context->components.empty());
++  DCHECK(!context->components.empty());
+   const bool is_foreground =
+       context->components.cbegin()->second->is_foreground();
+-  CHECK(std::ranges::all_of(
++  DCHECK(std::ranges::all_of(
+       context->components,
+       [is_foreground](IdToComponentPtrMap::const_reference& elem) {
+         return is_foreground == elem.second->is_foreground();
+@@ -181,7 +181,7 @@ void UpdateCheckerImpl::CheckForUpdatesHelper(
+     const auto& component = context->components.at(app_id);
+     CHECK_EQ(component->id(), app_id);
+     const auto& crx_component = component->crx_component();
+-    CHECK(crx_component);
++    DCHECK(crx_component);
+ 
+     if (crx_component->requires_network_encryption &&
+         !url.SchemeIsCryptographic()) {
+diff --git a/components/update_client/update_checker_unittest.cc b/components/update_client/update_checker_unittest.cc
+index a84f4b4f811b8..d83978ccdf068 100644
+--- a/components/update_client/update_checker_unittest.cc
++++ b/components/update_client/update_checker_unittest.cc
+@@ -817,7 +817,7 @@ TEST_P(UpdateCheckerTest, UpdateCheckInstallSource) {
+     return;
+   }
+ 
+-  CHECK(!is_foreground_);
++  DCHECK(!is_foreground_);
+   {
+     auto post_interceptor = std::make_unique<URLLoaderPostInterceptor>(
+         config_->test_url_loader_factory());
+diff --git a/components/update_client/update_client.cc b/components/update_client/update_client.cc
+index e48cc05f964e2..6b4b77da89a52 100644
+--- a/components/update_client/update_client.cc
++++ b/components/update_client/update_client.cc
+@@ -79,8 +79,8 @@ UpdateClientImpl::UpdateClientImpl(
+ UpdateClientImpl::~UpdateClientImpl() {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+ 
+-  CHECK(task_queue_.empty());
+-  CHECK(tasks_.empty());
++  DCHECK(task_queue_.empty());
++  DCHECK(tasks_.empty());
+ 
+   config_ = nullptr;
+ }
+@@ -159,7 +159,7 @@ void UpdateClientImpl::OnTaskComplete(Callback callback,
+                                       scoped_refptr<Task> task,
+                                       Error error) {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+-  CHECK(task);
++  DCHECK(task);
+ 
+   base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+       FROM_HERE, base::BindOnce(std::move(callback), error));
+diff --git a/components/update_client/update_engine.cc b/components/update_client/update_engine.cc
+index 2337158b4981c..4aeb9ab4e7fdd 100644
+--- a/components/update_client/update_engine.cc
++++ b/components/update_client/update_engine.cc
+@@ -167,11 +167,11 @@ base::RepeatingClosure UpdateEngine::InvokeOperation(
+               : notify_observers_callback_,
+           std::move(callback), config_->GetPersistedData(),
+           is_update_check_only);
+-  CHECK(!update_context->session_id.empty());
++  DCHECK(!update_context->session_id.empty());
+ 
+   const auto [unused, inserted] = update_contexts_.insert(
+       std::make_pair(update_context->session_id, update_context));
+-  CHECK(inserted);
++  DCHECK(inserted);
+ 
+   // Calls out to get the corresponding CrxComponent data for the components.
+   std::move(crx_data_callback)
+@@ -231,7 +231,7 @@ void UpdateEngine::StartOperation(
+ 
+ void UpdateEngine::DoUpdateCheck(scoped_refptr<UpdateContext> update_context) {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+-  CHECK(update_context);
++  DCHECK(update_context);
+ 
+   // Make the components transition from |kNew| to |kChecking| state.
+   for (const auto& id : update_context->components_to_check_for_updates) {
+@@ -253,7 +253,7 @@ void UpdateEngine::UpdateCheckResultsAvailable(
+     int error,
+     int retry_after_sec) {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+-  CHECK(update_context);
++  DCHECK(update_context);
+ 
+   update_context->retry_after_sec = retry_after_sec;
+ 
+@@ -277,7 +277,7 @@ void UpdateEngine::UpdateCheckResultsAvailable(
+           .Then(base::BindOnce(&UpdateEngine::UpdateCheckComplete, this,
+                                update_context)));
+   if (error) {
+-    CHECK(!results);
++    DCHECK(!results);
+     for (const auto& id : update_context->components_to_check_for_updates) {
+       CHECK_EQ(1u, update_context->components.count(id));
+       auto& component = update_context->components.at(id);
+@@ -287,7 +287,7 @@ void UpdateEngine::UpdateCheckResultsAvailable(
+     return;
+   }
+ 
+-  CHECK(results);
++  DCHECK(results);
+   CHECK_EQ(0, error);
+ 
+   std::map<std::string, ProtocolParser::Result> id_to_result;
+@@ -353,7 +353,7 @@ void UpdateEngine::UpdateCheckResultsAvailable(
+ void UpdateEngine::UpdateCheckComplete(
+     scoped_refptr<UpdateContext> update_context) {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+-  CHECK(update_context);
++  DCHECK(update_context);
+ 
+   for (const auto& id : update_context->components_to_check_for_updates) {
+     update_context->component_queue.push(id);
+@@ -374,7 +374,7 @@ void UpdateEngine::UpdateCheckComplete(
+ void UpdateEngine::HandleComponent(
+     scoped_refptr<UpdateContext> update_context) {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+-  CHECK(update_context);
++  DCHECK(update_context);
+ 
+   auto& queue = update_context->component_queue;
+ 
+@@ -392,7 +392,7 @@ void UpdateEngine::HandleComponent(
+   const auto& id = queue.front();
+   CHECK_EQ(1u, update_context->components.count(id));
+   const auto& component = update_context->components.at(id);
+-  CHECK(component);
++  DCHECK(component);
+ 
+   auto& next_update_delay = update_context->next_update_delay;
+   if (!next_update_delay.is_zero() && component->IsUpdateAvailable()) {
+@@ -411,15 +411,15 @@ void UpdateEngine::HandleComponent(
+ void UpdateEngine::HandleComponentComplete(
+     scoped_refptr<UpdateContext> update_context) {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+-  CHECK(update_context);
++  DCHECK(update_context);
+ 
+   auto& queue = update_context->component_queue;
+-  CHECK(!queue.empty());
++  DCHECK(!queue.empty());
+ 
+   const auto& id = queue.front();
+   CHECK_EQ(1u, update_context->components.count(id));
+   const auto& component = update_context->components.at(id);
+-  CHECK(component);
++  DCHECK(component);
+ 
+   base::OnceClosure callback =
+       base::BindOnce(&UpdateEngine::HandleComponent, this, update_context);
+@@ -427,7 +427,7 @@ void UpdateEngine::HandleComponentComplete(
+     update_context->next_update_delay = component->GetUpdateDuration();
+     queue.pop();
+     if (!component->events().empty()) {
+-      CHECK(component->crx_component());
++      DCHECK(component->crx_component());
+       ping_manager_->SendPing(component->session_id(),
+                               *component->crx_component(),
+                               component->GetEvents(), std::move(callback));
+@@ -442,7 +442,7 @@ void UpdateEngine::HandleComponentComplete(
+ void UpdateEngine::UpdateComplete(scoped_refptr<UpdateContext> update_context,
+                                   Error error) {
+   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+-  CHECK(update_context);
++  DCHECK(update_context);
+ 
+   const auto num_erased = update_contexts_.erase(update_context->session_id);
+   CHECK_EQ(1u, num_erased);
+diff --git a/components/update_client/update_query_params.cc b/components/update_client/update_query_params.cc
+index b1701d056cb05..e9644ce9ba859 100644
+--- a/components/update_client/update_query_params.cc
++++ b/components/update_client/update_query_params.cc
+@@ -153,7 +153,7 @@ std::string UpdateQueryParams::GetProdVersion() {
+ 
+ // static
+ void UpdateQueryParams::SetDelegate(UpdateQueryParamsDelegate* delegate) {
+-  CHECK(!g_delegate || !delegate || (delegate == g_delegate));
++  DCHECK(!g_delegate || !delegate || (delegate == g_delegate));
+   g_delegate = delegate;
+ }
+ 
+diff --git a/components/update_client/utils.cc b/components/update_client/utils.cc
+index d5774cbb2945d..016abb7fdbe46 100644
+--- a/components/update_client/utils.cc
++++ b/components/update_client/utils.cc
+@@ -81,7 +81,7 @@ std::string GetCrxComponentID(const CrxComponent& component) {
+ 
+ std::string GetCrxIdFromPublicKeyHash(base::span<const uint8_t> pk_hash) {
+   const std::string result = crx_file::id_util::GenerateIdFromHash(pk_hash);
+-  CHECK(crx_file::id_util::IdIsValid(result));
++  DCHECK(crx_file::id_util::IdIsValid(result));
+   return result;
+ }
+ 
+@@ -151,7 +151,7 @@ bool IsValidInstallerAttribute(const InstallerAttribute& attr) {
+ }
+ 
+ void RemoveUnsecureUrls(std::vector<GURL>* urls) {
+-  CHECK(urls);
++  DCHECK(urls);
+   std::erase_if(*urls,
+                 [](const GURL& url) { return !url.SchemeIsCryptographic(); });
+ }
