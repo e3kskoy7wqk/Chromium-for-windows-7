@@ -6,7 +6,7 @@ Chrome 109 is the last version to support Windows 7. This repository includes pa
 
 ## Platform Support
 
-Windows 7, 8, 10, 11.
+Windows 7 SP1 (with KB3080149 installed), Windows 8, Windows 10, Windows 11.
 
 ![](imgs/snapshot.png)
 
