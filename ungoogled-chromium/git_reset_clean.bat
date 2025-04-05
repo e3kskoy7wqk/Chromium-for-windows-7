@@ -262,6 +262,7 @@ git -C ui/webui/internal checkout .
 git -C webkit/data/bmp_decoder checkout .
 git -C webkit/data/ico_decoder checkout .
 git -C webkit/data/test_shell/plugins checkout .
+git -C third_party/search_engines_data/resources checkout .
 
 git clean -df
 git -C third_party/clang-format/script clean -df
@@ -523,5 +524,6 @@ git -C ui/webui/internal clean -df
 git -C webkit/data/bmp_decoder clean -df
 git -C webkit/data/ico_decoder clean -df
 git -C webkit/data/test_shell/plugins clean -df
+git -C third_party/search_engines_data/resources clean -df
 
 pause

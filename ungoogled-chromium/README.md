@@ -43,6 +43,8 @@ Open a command prompt and
    copy /Y %CHROMIUM%\third_party\win_build_output\midl\chrome\updater\app\server\win\x64\updater_idl.tlb %_ROOT_DIR%\TempDir\third_party\win_build_output\midl\chrome\updater\app\server\win\x64\updater_idl.tlb
    copy /Y %CHROMIUM%\third_party\win_build_output\midl\chrome\updater\app\server\win\x86\updater_legacy_idl.tlb %_ROOT_DIR%\TempDir\third_party\win_build_output\midl\chrome\updater\app\server\win\x86\updater_legacy_idl.tlb
    copy /Y %CHROMIUM%\third_party\win_build_output\midl\chrome\updater\app\server\win\x86\updater_idl.tlb %_ROOT_DIR%\TempDir\third_party\win_build_output\midl\chrome\updater\app\server\win\x86\updater_idl.tlb
+   mkdir %_ROOT_DIR%\TempDir\v8\test\torque
+   copy /Y %CHROMIUM%\v8\test\torque\test-torque.tq %_ROOT_DIR%\TempDir\v8\test\torque\test-torque.tq
    ```
 
 4. Retrieve windows downloads
@@ -87,6 +89,8 @@ Open a command prompt and
    copy /Y %_ROOT_DIR%\TempDir\third_party\win_build_output\midl\chrome\updater\app\server\win\x64\updater_idl.tlb %CHROMIUM%\third_party\win_build_output\midl\chrome\updater\app\server\win\x64\updater_idl.tlb
    copy /Y %_ROOT_DIR%\TempDir\third_party\win_build_output\midl\chrome\updater\app\server\win\x86\updater_legacy_idl.tlb %CHROMIUM%\third_party\win_build_output\midl\chrome\updater\app\server\win\x86\updater_legacy_idl.tlb
    copy /Y %_ROOT_DIR%\TempDir\third_party\win_build_output\midl\chrome\updater\app\server\win\x86\updater_idl.tlb %CHROMIUM%\third_party\win_build_output\midl\chrome\updater\app\server\win\x86\updater_idl.tlb
+   mkdir %CHROMIUM%\v8\test\torque
+   copy /Y %_ROOT_DIR%\TempDir\v8\test\torque\test-torque.tq %CHROMIUM%\v8\test\torque\test-torque.tq
    ```
 
 8. Modify patches
@@ -129,24 +133,16 @@ Open a command prompt and
     - args.gn:
 
       ```
-      chrome_pgo_phase=0
-      enable_swiftshader=false
+      is_official_build = true
+      is_component_build = false
+      is_debug = false
+      target_cpu = "x64"
+      target_os = "win"
+      clang_use_chrome_plugins = false
       ffmpeg_branding="Chrome"
-      is_clang=true
-      is_component_build=false
-      is_debug=false
-      is_official_build=true
       proprietary_codecs=true
-      target_cpu="x64"
-      use_sysroot=false
-      dcheck_always_on=false
-      blink_symbol_level=0
-      v8_symbol_level=0
-      symbol_level=0
-      enable_rust=true
-      enable_mse_mpeg2ts_stream_parser=true
       ```
-    
+
     - ```bat
       autoninja -C out\mybuild mini_installer
       ```
