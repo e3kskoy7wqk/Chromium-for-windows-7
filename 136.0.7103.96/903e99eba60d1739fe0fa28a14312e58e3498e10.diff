@@ -1,0 +1,117 @@
+
+
+diff --git a/content/browser/renderer_host/direct_manipulation_helper_win.cc b/content/browser/renderer_host/direct_manipulation_helper_win.cc
+index b04194c32a4d1..8a50a633084e7 100644
+--- a/content/browser/renderer_host/direct_manipulation_helper_win.cc
++++ b/content/browser/renderer_host/direct_manipulation_helper_win.cc
+@@ -173,9 +173,12 @@ void DirectManipulationHelper::OnPointerHitTest(WPARAM w_param) {
+   // For WM_POINTER, the pointer type will show the event from mouse.
+   // For WM_POINTERACTIVATE, the pointer id will be different with the following
+   // message.
++  using GetPointerTypeFn = BOOL(WINAPI*)(UINT32, POINTER_INPUT_TYPE*);
+   UINT32 pointer_id = GET_POINTERID_WPARAM(w_param);
+   POINTER_INPUT_TYPE pointer_type;
+-  if (::GetPointerType(pointer_id, &pointer_type) &&
++  static const auto get_pointer_type = reinterpret_cast<GetPointerTypeFn>(
++      base::win::GetUser32FunctionPointer("GetPointerType"));
++  if (get_pointer_type && get_pointer_type(pointer_id, &pointer_type) &&
+       pointer_type == PT_TOUCHPAD) {
+     viewport_->SetContact(pointer_id);
+   }
+diff --git a/ui/views/win/hwnd_message_handler.cc b/ui/views/win/hwnd_message_handler.cc
+index 7516856fb9314..3b4ddec2a7cbf 100644
+--- a/ui/views/win/hwnd_message_handler.cc
++++ b/ui/views/win/hwnd_message_handler.cc
+@@ -286,23 +295,5 @@ constexpr auto kTouchDownContextResetTimeout = base::Milliseconds(500);
+ // same location as the cursor.
+ constexpr int kSynthesizedMouseMessagesTimeDifference = 500;
+ 
+-// TODO(dloehr): As of SDK version 10.0.26100.0, IsWindowArranged is now
+-// declared in a header file, so we no longer need this version. Remove this
+-// code once the SDK update is finalized.
+-#ifndef NTDDI_WIN11_GE
+-// Returns true if the window is arranged via Snap. For example, the browser
+-// window is snapped via buttons shown when the mouse is hovered over window
+-// maximize button.
+-bool IsWindowArranged(HWND window) {
+-  // IsWindowArranged() is not a part of any header file.
+-  // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-iswindowarranged
+-  using IsWindowArrangedFuncType = BOOL(WINAPI*)(HWND);
+-  static const auto is_window_arranged_func =
+-      reinterpret_cast<IsWindowArrangedFuncType>(
+-          base::win::GetUser32FunctionPointer("IsWindowArranged"));
+-  return is_window_arranged_func ? is_window_arranged_func(window) : false;
+-}
+-#endif  // NTDDI_WIN11_GE
+-
+ }  // namespace
+ 
+@@ -682,8 +682,15 @@ void HWNDMessageHandler::Show(ui::mojom::WindowShowState show_state,
+     SetWindowPlacement(hwnd(), &placement);
+     native_show_state = SW_SHOWMAXIMIZED;
+   } else {
++    // IsWindowArranged() is not a part of any header file.
++    // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-iswindowarranged
++    using IsWindowArrangedFuncType = BOOL(WINAPI*)(HWND);
++    static const auto is_window_arranged_func =
++        reinterpret_cast<IsWindowArrangedFuncType>(
++            base::win::GetUser32FunctionPointer("IsWindowArranged"));
++
+     const bool is_maximized_or_arranged =
+-        IsMaximized() || IsWindowArranged(hwnd());
++        IsMaximized() || (is_window_arranged_func ? is_window_arranged_func(hwnd()) : false);
+ 
+     // Use SW_SHOW/SW_SHOWNA instead of SW_SHOWNORMAL/SW_SHOWNOACTIVATE so that
+     // the window is not restored to its original position if it is maximized.
+@@ -2094,8 +2094,12 @@ LRESULT HWNDMessageHandler::OnMouseRange(UINT message,
+ LRESULT HWNDMessageHandler::OnPointerActivate(UINT message,
+                                               WPARAM w_param,
+                                               LPARAM l_param) {
++  using GetPointerTypeFn = BOOL(WINAPI*)(UINT32, POINTER_INPUT_TYPE*);
++  UINT32 pointer_id = GET_POINTERID_WPARAM(w_param);
+   POINTER_INPUT_TYPE pointer_type;
+-  if (::GetPointerType(GET_POINTERID_WPARAM(w_param), &pointer_type) &&
++  static const auto get_pointer_type = reinterpret_cast<GetPointerTypeFn>(
++      base::win::GetUser32FunctionPointer("GetPointerType"));
++  if (get_pointer_type && get_pointer_type(pointer_id, &pointer_type) &&
+       pointer_type == PT_TOUCHPAD) {
+     return PA_NOACTIVATE;
+   }
+@@ -2106,11 +2110,15 @@ LRESULT HWNDMessageHandler::OnPointerActivate(UINT message,
+ LRESULT HWNDMessageHandler::OnPointerEvent(UINT message,
+                                            WPARAM w_param,
+                                            LPARAM l_param) {
++  UINT32 pointer_id = GET_POINTERID_WPARAM(w_param);
++  using GetPointerTypeFn = BOOL(WINAPI*)(UINT32, POINTER_INPUT_TYPE*);
+   POINTER_INPUT_TYPE pointer_type;
++  static const auto get_pointer_type = reinterpret_cast<GetPointerTypeFn>(
++      base::win::GetUser32FunctionPointer("GetPointerType"));
+   // If the WM_POINTER messages are not sent from a stylus device, then we do
+   // not handle them to make sure we do not change the current behavior of
+   // touch and mouse inputs.
+-  if (!::GetPointerType(GET_POINTERID_WPARAM(w_param), &pointer_type)) {
++  if (!get_pointer_type || !get_pointer_type(pointer_id, &pointer_type)) {
+     SetMsgHandled(FALSE);
+     return -1;
+   }
+@@ -3046,12 +3046,19 @@ void HWNDMessageHandler::OnWindowPosChanging(WINDOWPOS* window_pos) {
+       const bool fullscreen_without_hack =
+           IsFullscreen() && !background_fullscreen_hack_;
+ 
++      // IsWindowArranged() is not a part of any header file.
++      // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-iswindowarranged
++      using IsWindowArrangedFuncType = BOOL(WINAPI*)(HWND);
++      static const auto is_window_arranged_func =
++          reinterpret_cast<IsWindowArrangedFuncType>(
++              base::win::GetUser32FunctionPointer("IsWindowArranged"));
++
+       // If the browser window is arranged by Snap, then we should not change
+       // its position but let Windows do it.
+       if (same_monitor &&
+           (incorrect_maximized_bounds || fullscreen_without_hack ||
+            work_area_changed) &&
+-          !IsWindowArranged(hwnd())) {
++          !(is_window_arranged_func ? is_window_arranged_func(hwnd()) : false)) {
+         // A rect for the monitor we're on changed.  Normally Windows notifies
+         // us about this (and thus we're reaching here due to the SetWindowPos()
+         // call in OnSettingChange() above), but with some software (e.g.
