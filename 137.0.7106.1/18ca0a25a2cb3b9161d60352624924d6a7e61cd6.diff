@@ -737,3 +737,20 @@ index b1b039e9aa656..0437fa3ce5824 100644
    HRESULT hr = base::win::GetActivationFactory<
        IUserConsentVerifierStatics,
        RuntimeClass_Windows_Security_Credentials_UI_UserConsentVerifier>(
+diff --git a/chrome/browser/win/limited_access_features.cc b/chrome/browser/win/limited_access_features.cc
+index b1b039e9aa656..0437fa3ce5824 100644
+--- a/chrome/browser/win/limited_access_features.cc
++++ b/chrome/browser/win/limited_access_features.cc
+@@ -51,6 +51,12 @@ bool TryToUnlockLimitedAccessFeature(const std::wstring& feature,
+   ComPtr<ILimitedAccessFeaturesStatics> limited_access_features;
+   ComPtr<ILimitedAccessFeatureRequestResult> limited_access_features_result;
+ 
++  // Provide access to Core WinRT/UWP functions.
++  if (!base::win::ResolveCoreWinRTDelayload()) {
++    // Failed loading functions from combase.dll.
++    return false;
++  }
++
+   HRESULT hr = base::win::RoGetActivationFactory(
+       HStringReference(
+           RuntimeClass_Windows_ApplicationModel_LimitedAccessFeatures)

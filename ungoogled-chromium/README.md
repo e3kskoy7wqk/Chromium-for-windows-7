@@ -68,6 +68,8 @@ Open a command prompt and
    mkdir %CHROMIUM%\third_party\rust-toolchain-x64
    rd /s /q %CHROMIUM%\third_party\rust-toolchain-x86
    mkdir %CHROMIUM%\third_party\rust-toolchain-x86
+   rd /s /q %CHROMIUM%\third_party\rust-toolchain-arm
+   mkdir %CHROMIUM%\third_party\rust-toolchain-arm
    ```
 
 6. Unpack downloads
@@ -133,16 +135,24 @@ Open a command prompt and
     - args.gn:
 
       ```
-      is_official_build = true
-      is_component_build = false
-      is_debug = false
-      target_cpu = "x64"
-      target_os = "win"
-      clang_use_chrome_plugins = false
+      chrome_pgo_phase=0
+      enable_swiftshader=false
       ffmpeg_branding="Chrome"
+      is_clang=true
+      is_component_build=false
+      is_debug=false
+      is_official_build=true
       proprietary_codecs=true
+      target_cpu="x64"
+      use_sysroot=false
+      dcheck_always_on=false
+      blink_symbol_level=0
+      v8_symbol_level=0
+      symbol_level=0
+      enable_rust=true
+      enable_mse_mpeg2ts_stream_parser=true
       ```
-
+    
     - ```bat
       autoninja -C out\mybuild mini_installer
       ```

@@ -697,3 +697,17 @@ index ef56fe683c81f..6ca68629a23e1 100644
  
    if (!can_use_scoped_hstring)
      return std::nullopt;
+diff --git a/chrome/browser/win/limited_access_features.cc b/chrome/browser/win/limited_access_features.cc
+index b1b039e9aa656..0437fa3ce5824 100644
+--- a/chrome/browser/win/limited_access_features.cc
++++ b/chrome/browser/win/limited_access_features.cc
+@@ -51,7 +51,8 @@ bool TryToUnlockLimitedAccessFeature(const std::wstring& feature,
+   ComPtr<ILimitedAccessFeatureRequestResult> limited_access_features_result;
+ 
+   // Provide access to Core WinRT/UWP functions.
+-  if (!base::win::ResolveCoreWinRTDelayload()) {
++  if (!base::win::ResolveCoreWinRTDelayload() ||
++      !base::win::ScopedHString::ResolveCoreWinRTStringDelayload()) {
+     // Failed loading functions from combase.dll.
+     return false;
+   }
