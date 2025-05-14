@@ -16,8 +16,6 @@ Windows 7 SP1 with KB3080149 (for EventSetInformation) and KB4019990 (for d3dcom
 
    **Note**: These patches have only been tested on Chromium versions 122.0.6261.34, 122.0.6261.116, 123.0.6312.16, 123.0.6312.32, 124.0.6338.2, 124.0.6341.0, 124.0.6345.0, 124.0.6349.1, 124.0.6352.2, 124.0.6365.1, 124.0.6367.14, 125.0.6384.1, 125.0.6386.0, 125.0.6392.1, 125.0.6394.1, 125.0.6400.1, ..., and may not work on other versions. Therefore, you may need to use `git checkout` to switch to the corresponding Chromium version.
 
-   **Note**: Make sure to disable chromium's clang plugin, as failing to do so will result in a failed compilation due to incompatibility between the patch and a certain chromium's clang plugin. To disable chromium's clang plugin, simply set `clang_use_chrome_plugins = false` in your args.gn.
-
    **Note**: Setting `target_cpu = "x86"` to build the 32-bit version, setting `target_cpu = "x64"` to build the 64-bit version, and other values for `target_cpu` are not supported.
 
    The suggested content in args.gn is:
@@ -28,7 +26,9 @@ Windows 7 SP1 with KB3080149 (for EventSetInformation) and KB4019990 (for d3dcom
    is_debug = false
    target_cpu = "x86"
    target_os = "win"
-   clang_use_chrome_plugins = false
+   ffmpeg_branding="Chrome"
+   proprietary_codecs=true
+   treat_warnings_as_errors = false
    ```
 
 2. git clone https://github.com/e3kskoy7wqk/Chromium-for-windows-7.git.
