@@ -1,0 +1,30 @@
+diff --git a/testing/variations/fieldtrial_testing_config.json b/testing/variations/fieldtrial_testing_config.json
+index 0508531e08ae0..5923e78726c84 100644
+--- a/testing/variations/fieldtrial_testing_config.json
++++ b/testing/variations/fieldtrial_testing_config.json
+@@ -13078,25 +13078,6 @@
+             ]
+         }
+     ],
+-    "LCPPPrefetchSubresource": [
+-        {
+-            "platforms": [
+-                "android",
+-                "chromeos",
+-                "linux",
+-                "mac",
+-                "windows"
+-            ],
+-            "experiments": [
+-                {
+-                    "name": "Enabled",
+-                    "enable_features": [
+-                        "LCPPPrefetchSubresource"
+-                    ]
+-                }
+-            ]
+-        }
+-    ],
+     "LCPTimingPredictorPrerender2": [
+         {
+             "platforms": [
