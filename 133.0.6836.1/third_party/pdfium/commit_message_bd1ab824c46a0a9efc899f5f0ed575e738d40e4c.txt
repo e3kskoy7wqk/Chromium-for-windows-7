@@ -1,1 +1,1 @@
-Updated GDI compatibility patch for M123+
+Updated GDI compatibility patch for M123+

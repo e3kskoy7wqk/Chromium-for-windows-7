@@ -1,1 +1,1 @@
-Disable QueryUnbiasedInterruptTimePrecise on win7
+Disable QueryUnbiasedInterruptTimePrecise on win7

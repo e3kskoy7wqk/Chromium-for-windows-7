@@ -175,7 +175,7 @@ index 08cf9010c8716..43c9dd2998fbd 100644
 @@ -88,6 +89,11 @@ sk_sp<SkTypeface> MakeSbixTypeface(
      return instantiator.make_fontations(data);
    }
-
+ 
 +#if BUILDFLAG(IS_WIN)
 +  if (!blink::DWriteRasterizerSupport::IsDWriteFactory2Available())
 +    return instantiator.make_fallback(data);

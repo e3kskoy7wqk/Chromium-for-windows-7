@@ -294,7 +294,7 @@ index d35396a9f2..e195f54584 100644
      friend class SkRandomTypeface;   // getAdvancedMetrics
      friend class SkPDFFont;          // getAdvancedMetrics
      friend class SkTypeface_fontconfig;
-
+ 
 -    friend class SkFontPriv;         // getGlyphToUnicodeMap
 +    /** Style specifies the intrinsic style attributes of a given typeface */
 +    enum Style {

@@ -1,0 +1,344 @@
+diff --git a/components/commerce/core/commerce_feature_list.cc b/components/commerce/core/commerce_feature_list.cc
+index ca3064fdbe4f0..cdb3ff0a57e74 100644
+--- a/components/commerce/core/commerce_feature_list.cc
++++ b/components/commerce/core/commerce_feature_list.cc
+@@ -50,12 +50,6 @@ const CountryLocaleMap& GetAllowedCountryToLocaleMap() {
+     map[&kShoppingListRegionLaunched] = {{"us", {"en-us"}}};
+     map[&kShoppingPageTypesRegionLaunched] = {{"us", {"en-us"}}};
+     map[&kShoppingPDPMetricsRegionLaunched] = {{"us", {"en-us"}}};
+-    map[&kSubscriptionsApiRegionLaunched] = {
+-        {"us", {"en", "en-gb", "en-us"}},
+-        {"au", {"en", "en-au", "en-gb", "en-us"}},
+-        {"ca", {"en", "en-ca", "en-gb", "en-us"}},
+-        {"in", {"en", "en-gb", "en-in", "en-us"}},
+-        {"jp", {"ja", "ja-jp"}}};
+ 
+     return map;
+   }());
+@@ -316,17 +310,6 @@ BASE_FEATURE(kShoppingPDPMetricsRegionLaunched,
+              "ShoppingPDPMetricsRegionLaunched",
+              base::FEATURE_ENABLED_BY_DEFAULT);
+ 
+-BASE_DECLARE_FEATURE(kSubscriptionsApi);
+-BASE_DECLARE_FEATURE(kSubscriptionsApiRegionLaunched);
+-
+-BASE_FEATURE(kSubscriptionsApi,
+-             "SubscriptionsApi",
+-             base::FEATURE_DISABLED_BY_DEFAULT);
+-
+-BASE_FEATURE(kSubscriptionsApiRegionLaunched,
+-             "SubscriptionsApiRegionLaunched",
+-             base::FEATURE_ENABLED_BY_DEFAULT);
+-
+ BASE_FEATURE(kTrackByDefaultOnMobile,
+              "TrackByDefaultOnMobile",
+              base::FEATURE_DISABLED_BY_DEFAULT);
+diff --git a/components/commerce/core/commerce_feature_list.h b/components/commerce/core/commerce_feature_list.h
+index 6d20f0992ad76..fe3fbbc1e3efe 100644
+--- a/components/commerce/core/commerce_feature_list.h
++++ b/components/commerce/core/commerce_feature_list.h
+@@ -92,8 +92,6 @@ BASE_DECLARE_FEATURE(kShoppingPageTypes);
+ BASE_DECLARE_FEATURE(kShoppingPageTypesRegionLaunched);
+ BASE_DECLARE_FEATURE(kShoppingPDPMetrics);
+ BASE_DECLARE_FEATURE(kShoppingPDPMetricsRegionLaunched);
+-BASE_DECLARE_FEATURE(kSubscriptionsApi);
+-BASE_DECLARE_FEATURE(kSubscriptionsApiRegionLaunched);
+ BASE_DECLARE_FEATURE(kTrackByDefaultOnMobile);
+ 
+ #if BUILDFLAG(IS_IOS)
+diff --git a/components/commerce/core/feature_utils.cc b/components/commerce/core/feature_utils.cc
+index b87f114e013fa..cb5cffa27d57c 100644
+--- a/components/commerce/core/feature_utils.cc
++++ b/components/commerce/core/feature_utils.cc
+@@ -39,12 +39,6 @@ bool IsShoppingListEligible(AccountChecker* account_checker) {
+   return true;
+ }
+ 
+-bool IsSubscriptionsApiEnabled(AccountChecker* account_checker) {
+-  return IsRegionLockedFeatureEnabled(
+-      kSubscriptionsApi, kSubscriptionsApiRegionLaunched,
+-      account_checker->GetCountry(), account_checker->GetLocale());
+-}
+-
+ bool IsProductSpecificationsAllowedForEnterprise(PrefService* prefs) {
+   // 0 is fully enabled, 1 is enabled without logging, 2 is totally disabled.
+   return prefs->GetInteger(optimization_guide::prefs::
+diff --git a/components/commerce/core/feature_utils.h b/components/commerce/core/feature_utils.h
+index c8e5adae6ef29..f4fe5c42fcd41 100644
+--- a/components/commerce/core/feature_utils.h
++++ b/components/commerce/core/feature_utils.h
+@@ -20,11 +20,6 @@ class ProductSpecificationsService;
+ // whether to create critical, feature-related infrastructure.
+ bool IsShoppingListEligible(AccountChecker* account_checker);
+ 
+-// Returns whether the subscriptions API is available for use. This considers
+-// the user's region and locale and is not necessarily bound to any specific
+-// user-facing feature.
+-bool IsSubscriptionsApiEnabled(AccountChecker* account_checker);
+-
+ // Check if the product specifications feature is allowed for enterprise.
+ bool IsProductSpecificationsAllowedForEnterprise(PrefService* prefs);
+ 
+diff --git a/components/commerce/core/metrics/scheduled_metrics_manager.cc b/components/commerce/core/metrics/scheduled_metrics_manager.cc
+index 929b4aa931529..eb72441c6379e 100644
+--- a/components/commerce/core/metrics/scheduled_metrics_manager.cc
++++ b/components/commerce/core/metrics/scheduled_metrics_manager.cc
+@@ -9,7 +9,6 @@
+ #include "base/functional/bind.h"
+ #include "base/metrics/histogram_functions.h"
+ #include "base/task/sequenced_task_runner.h"
+-#include "components/commerce/core/feature_utils.h"
+ #include "components/commerce/core/pref_names.h"
+ #include "components/commerce/core/price_tracking_utils.h"
+ #include "components/commerce/core/shopping_service.h"
+@@ -55,33 +54,27 @@ void ScheduledMetricsManager::RunDailyTask() {
+   base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
+       FROM_HERE, daily_scheduled_task_->callback(), kDailyInterval);
+ 
+-  // These metrics should only ever be recorded if the user is eligible for the
+-  // feature.
+-  if (commerce::IsShoppingListEligible(
+-          shopping_service_->GetAccountChecker())) {
+-    CHECK(IsSubscriptionsApiEnabled(shopping_service_->GetAccountChecker()));
+-    shopping_service_->GetAllSubscriptions(
+-        SubscriptionType::kPriceTrack,
+-        base::BindOnce(
+-            [](PrefService* pref_service,
+-               std::vector<CommerceSubscription> tracked_products) {
+-              base::UmaHistogramCounts100(kTrackedProductCountHistogramName,
+-                                          tracked_products.size());
++  shopping_service_->GetAllSubscriptions(
++      SubscriptionType::kPriceTrack,
++      base::BindOnce(
++          [](PrefService* pref_service,
++             std::vector<CommerceSubscription> tracked_products) {
++            base::UmaHistogramCounts100(kTrackedProductCountHistogramName,
++                                        tracked_products.size());
+ 
+-              PriceNotificationEmailState state =
+-                  PriceNotificationEmailState::kNotResponded;
+-              if (tracked_products.size() > 0) {
+-                if (pref_service->GetBoolean(kPriceEmailNotificationsEnabled)) {
+-                  state = PriceNotificationEmailState::kEnabled;
+-                } else {
+-                  state = PriceNotificationEmailState::kDisabled;
+-                }
++            PriceNotificationEmailState state =
++                PriceNotificationEmailState::kNotResponded;
++            if (tracked_products.size() > 0) {
++              if (pref_service->GetBoolean(kPriceEmailNotificationsEnabled)) {
++                state = PriceNotificationEmailState::kEnabled;
++              } else {
++                state = PriceNotificationEmailState::kDisabled;
+               }
+-              base::UmaHistogramEnumeration(
+-                  kPriceNotificationEmailHistogramName, state);
+-            },
+-            pref_service_));
+-  }
++            }
++            base::UmaHistogramEnumeration(kPriceNotificationEmailHistogramName,
++                                          state);
++          },
++          pref_service_));
+ }
+ 
+ }  // namespace commerce::metrics
+diff --git a/components/commerce/core/metrics/scheduled_metrics_manager_unittest.cc b/components/commerce/core/metrics/scheduled_metrics_manager_unittest.cc
+index 04193b00ec7cd..9ccebf96d7e79 100644
+--- a/components/commerce/core/metrics/scheduled_metrics_manager_unittest.cc
++++ b/components/commerce/core/metrics/scheduled_metrics_manager_unittest.cc
+@@ -2,18 +2,14 @@
+ // Use of this source code is governed by a BSD-style license that can be
+ // found in the LICENSE file.
+ 
+-#include "components/commerce/core/metrics/scheduled_metrics_manager.h"
+-
+ #include <map>
+ #include <memory>
+ 
+ #include "base/functional/bind.h"
+ #include "base/run_loop.h"
+ #include "base/test/metrics/histogram_tester.h"
+-#include "base/test/scoped_feature_list.h"
+ #include "base/test/task_environment.h"
+-#include "components/commerce/core/commerce_feature_list.h"
+-#include "components/commerce/core/mock_account_checker.h"
++#include "components/commerce/core/metrics/scheduled_metrics_manager.h"
+ #include "components/commerce/core/mock_shopping_service.h"
+ #include "components/commerce/core/pref_names.h"
+ #include "components/commerce/core/price_tracking_utils.h"
+@@ -30,9 +26,8 @@ namespace commerce::metrics {
+ class ScheduledMetricsManagerTest : public testing::Test {
+  public:
+   ScheduledMetricsManagerTest()
+-      : account_checker_(std::make_unique<MockAccountChecker>()),
+-        pref_service_(std::make_unique<TestingPrefServiceSimple>()),
+-        shopping_service_(std::make_unique<MockShoppingService>()) {}
++      : shopping_service_(std::make_unique<MockShoppingService>()),
++        pref_service_(std::make_unique<TestingPrefServiceSimple>()) {}
+   ScheduledMetricsManagerTest(const ScheduledMetricsManagerTest&) = delete;
+   ScheduledMetricsManagerTest operator=(const ScheduledMetricsManagerTest&) =
+       delete;
+@@ -40,13 +35,7 @@ class ScheduledMetricsManagerTest : public testing::Test {
+ 
+   void TestBody() override {}
+ 
+-  void SetUp() override {
+-    test_features_.InitWithFeatures({kSubscriptionsApi, kShoppingList}, {});
+-    RegisterCommercePrefs(pref_service_->registry());
+-    SetShoppingListEnterprisePolicyPref(pref_service_.get(), true);
+-    account_checker_->SetPrefs(pref_service_.get());
+-    shopping_service_->SetAccountChecker(account_checker_.get());
+-  }
++  void SetUp() override { RegisterPrefs(pref_service_->registry()); }
+ 
+   void CreateUpdateManagerAndWait() {
+     auto metrics_manager = std::make_unique<ScheduledMetricsManager>(
+@@ -55,11 +44,9 @@ class ScheduledMetricsManagerTest : public testing::Test {
+   }
+ 
+  protected:
+-  base::test::ScopedFeatureList test_features_;
+   base::test::TaskEnvironment task_environment_;
+-  std::unique_ptr<MockAccountChecker> account_checker_;
+-  std::unique_ptr<TestingPrefServiceSimple> pref_service_;
+   std::unique_ptr<MockShoppingService> shopping_service_;
++  std::unique_ptr<TestingPrefServiceSimple> pref_service_;
+ };
+ 
+ TEST_F(ScheduledMetricsManagerTest, TrackedProductCountRecorded) {
+diff --git a/components/commerce/core/shopping_service.cc b/components/commerce/core/shopping_service.cc
+index 4e2af1b90cd54..1a5b796d579c6 100644
+--- a/components/commerce/core/shopping_service.cc
++++ b/components/commerce/core/shopping_service.cc
+@@ -242,7 +242,10 @@ ShoppingService::ShoppingService(
+   }
+ 
+   if (identity_manager && account_checker_) {
+-    if (subscription_proto_db) {
++    if (subscription_proto_db &&
++        commerce::IsRegionLockedFeatureEnabled(
++            kShoppingList, kShoppingListRegionLaunched,
++            account_checker_->GetCountry(), account_checker_->GetLocale())) {
+       subscriptions_manager_ = std::make_unique<SubscriptionsManager>(
+           identity_manager, url_loader_factory, subscription_proto_db,
+           account_checker_.get());
+diff --git a/components/commerce/core/subscriptions/BUILD.gn b/components/commerce/core/subscriptions/BUILD.gn
+index c32fb14586883..b7abe38155195 100644
+--- a/components/commerce/core/subscriptions/BUILD.gn
++++ b/components/commerce/core/subscriptions/BUILD.gn
+@@ -21,7 +21,6 @@ source_set("subscriptions") {
+     "//components/commerce/core:commerce_constants",
+     "//components/commerce/core:commerce_subscription_db_content_proto",
+     "//components/commerce/core:feature_list",
+-    "//components/commerce/core:feature_utils",
+     "//components/endpoint_fetcher:endpoint_fetcher",
+     "//components/leveldb_proto",
+     "//components/signin/public/identity_manager:identity_manager",
+diff --git a/components/commerce/core/subscriptions/subscriptions_manager.cc b/components/commerce/core/subscriptions/subscriptions_manager.cc
+index 3736125c36aa3..891f976c3e149 100644
+--- a/components/commerce/core/subscriptions/subscriptions_manager.cc
++++ b/components/commerce/core/subscriptions/subscriptions_manager.cc
+@@ -4,14 +4,10 @@
+ 
+ #include "components/commerce/core/subscriptions/subscriptions_manager.h"
+ 
+-#include <queue>
+-#include <string>
+-
+ #include "base/metrics/histogram_functions.h"
+ #include "base/task/sequenced_task_runner.h"
+ #include "base/time/time.h"
+ #include "components/commerce/core/commerce_feature_list.h"
+-#include "components/commerce/core/feature_utils.h"
+ #include "components/commerce/core/subscriptions/commerce_subscription.h"
+ #include "components/commerce/core/subscriptions/subscriptions_observer.h"
+ #include "components/commerce/core/subscriptions/subscriptions_server_proxy.h"
+@@ -19,6 +15,9 @@
+ #include "components/session_proto_db/session_proto_storage.h"
+ #include "services/network/public/cpp/shared_url_loader_factory.h"
+ 
++#include <queue>
++#include <string>
++
+ namespace commerce {
+ 
+ namespace {
+@@ -73,12 +72,6 @@ SubscriptionsManager::Request::~Request() = default;
+ void SubscriptionsManager::Subscribe(
+     std::unique_ptr<std::vector<CommerceSubscription>> subscriptions,
+     base::OnceCallback<void(bool)> callback) {
+-  if (!IsSubscriptionsApiEnabled(account_checker_)) {
+-    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+-        FROM_HERE, base::BindOnce(std::move(callback), false));
+-    return;
+-  }
+-
+   CHECK(subscriptions->size() > 0);
+ 
+   SyncIfNeeded();
+@@ -94,12 +87,6 @@ void SubscriptionsManager::Subscribe(
+ void SubscriptionsManager::Unsubscribe(
+     std::unique_ptr<std::vector<CommerceSubscription>> subscriptions,
+     base::OnceCallback<void(bool)> callback) {
+-  if (!IsSubscriptionsApiEnabled(account_checker_)) {
+-    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+-        FROM_HERE, base::BindOnce(std::move(callback), false));
+-    return;
+-  }
+-
+   CHECK(subscriptions->size() > 0);
+ 
+   SyncIfNeeded();
+@@ -113,10 +100,6 @@ void SubscriptionsManager::Unsubscribe(
+ }
+ 
+ void SubscriptionsManager::SyncSubscriptions() {
+-  if (!IsSubscriptionsApiEnabled(account_checker_)) {
+-    return;
+-  }
+-
+   pending_requests_.emplace(AsyncOperation::kSync,
+                             base::BindOnce(&SubscriptionsManager::HandleSync,
+                                            weak_ptr_factory_.GetWeakPtr()));
+@@ -126,12 +109,6 @@ void SubscriptionsManager::SyncSubscriptions() {
+ void SubscriptionsManager::IsSubscribed(
+     CommerceSubscription subscription,
+     base::OnceCallback<void(bool)> callback) {
+-  if (!IsSubscriptionsApiEnabled(account_checker_)) {
+-    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+-        FROM_HERE, base::BindOnce(std::move(callback), false));
+-    return;
+-  }
+-
+   SyncIfNeeded();
+ 
+   pending_requests_.emplace(
+@@ -150,13 +127,6 @@ bool SubscriptionsManager::IsSubscribedFromCache(
+ void SubscriptionsManager::GetAllSubscriptions(
+     SubscriptionType type,
+     base::OnceCallback<void(std::vector<CommerceSubscription>)> callback) {
+-  if (!IsSubscriptionsApiEnabled(account_checker_)) {
+-    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+-        FROM_HERE, base::BindOnce(std::move(callback),
+-                                  std::vector<CommerceSubscription>()));
+-    return;
+-  }
+-
+   SyncIfNeeded();
+ 
+   pending_requests_.emplace(AsyncOperation::kGetAll,
+diff --git a/components/commerce/core/subscriptions/subscriptions_manager_unittest.cc b/components/commerce/core/subscriptions/subscriptions_manager_unittest.cc
+index d0774d795c729..4453ec9c859ca 100644
+--- a/components/commerce/core/subscriptions/subscriptions_manager_unittest.cc
++++ b/components/commerce/core/subscriptions/subscriptions_manager_unittest.cc
+@@ -252,7 +252,7 @@ class SubscriptionsManagerTest : public testing::Test,
+   SubscriptionsManagerTest()
+       : mock_server_proxy_(std::make_unique<MockSubscriptionsServerProxy>()),
+         mock_storage_(std::make_unique<MockSubscriptionsStorage>()) {
+-    test_features_.InitAndEnableFeature(commerce::kSubscriptionsApi);
++    test_features_.InitAndEnableFeature(commerce::kShoppingList);
+   }
+   ~SubscriptionsManagerTest() override = default;
+ 

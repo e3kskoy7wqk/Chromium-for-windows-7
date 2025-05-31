@@ -7,7 +7,7 @@ index 9a414d886f779..30bf9ba0b379e 100644
 @@ -266,13 +266,17 @@ Process::Priority Process::GetPriority() const {
      return Priority::kBestEffort;
    }
-
+ 
 +  static const auto get_process_information_fn =
 +      reinterpret_cast<decltype(&::GetProcessInformation)>(::GetProcAddress(
 +          ::GetModuleHandle(L"Kernel32.dll"), "GetProcessInformation"));
@@ -21,7 +21,7 @@ index 9a414d886f779..30bf9ba0b379e 100644
 +      get_process_information_fn != 0 &&
 +      get_process_information_fn(Handle(), ProcessPowerThrottling,
                                &power_throttling, sizeof(power_throttling));
-
+ 
    // Return Priority::kUserVisible if EcoQoS read & write supported and level
 @@ -270,5 +270,8 @@ bool Process::SetPriority(Priority priority) {
                                     ? IDLE_PRIORITY_CLASS

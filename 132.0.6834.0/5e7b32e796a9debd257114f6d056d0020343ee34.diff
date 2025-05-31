@@ -71,7 +71,7 @@ index 3a8ea5e67bda3..cb2713c02a1ca 100644
 @@ -533,9 +533,6 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
      startup_info->SetAppContainer(container);
    }
-
+ 
 -  // TODO(crbug.com/1428756) remove all calls to HasJob in follow-up CLs.
 -  DCHECK(policy_base->HasJob());
 -

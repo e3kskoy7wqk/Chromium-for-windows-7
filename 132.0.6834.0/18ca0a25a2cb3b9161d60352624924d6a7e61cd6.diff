@@ -744,7 +744,7 @@ index b1b039e9aa656..0437fa3ce5824 100644
 +++ b/device/fido/win/util.cc
 @@ -51,6 +51,12 @@ void DeviceHasBiometricsAvailableInternal(
    }
-
+ 
    ComPtr<IUserConsentVerifierStatics> factory;
 +  // Provide access to Core WinRT/UWP functions.
 +  if (!base::win::ResolveCoreWinRTDelayload()) {

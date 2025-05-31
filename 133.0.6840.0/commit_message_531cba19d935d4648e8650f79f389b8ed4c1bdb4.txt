@@ -1,1 +1,1 @@
-Disable GetPackagesByPackageFamily and GetPackagePathByFullName on win7
+Disable GetPackagesByPackageFamily and GetPackagePathByFullName on win7
