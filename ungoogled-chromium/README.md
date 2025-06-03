@@ -125,13 +125,11 @@ Open a command prompt and
 
 11. Invoke the build
 
-    - In `%CHROMIUM%\build\config\compiler\compiler.gni`, change `treat_warnings_as_errors = true` to `treat_warnings_as_errors = false`.
-
     - ```bat
       cd /d %CHROMIUM%
       gn args out\mybuild
       ```
-
+    
     - args.gn:
 
       ```
@@ -151,6 +149,7 @@ Open a command prompt and
       symbol_level=0
       enable_rust=true
       enable_mse_mpeg2ts_stream_parser=true
+      treat_warnings_as_errors = false
       ```
     
     - ```bat

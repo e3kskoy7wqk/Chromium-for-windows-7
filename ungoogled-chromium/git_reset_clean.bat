@@ -265,6 +265,7 @@ git -C webkit/data/test_shell/plugins checkout .
 git -C third_party/search_engines_data/resources checkout .
 git -C third_party/speedometer/v3.1 checkout .
 git -C third_party/webpagereplay checkout .
+git -C third_party/compiler-rt/src checkout .
 
 git clean -df
 git -C third_party/clang-format/script clean -df
@@ -529,5 +530,6 @@ git -C webkit/data/test_shell/plugins clean -df
 git -C third_party/search_engines_data/resources clean -df
 git -C third_party/speedometer/v3.1 clean -df
 git -C third_party/webpagereplay clean -df
+git -C third_party/compiler-rt/src clean -df
 
 pause
