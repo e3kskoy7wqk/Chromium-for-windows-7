@@ -178,6 +178,19 @@ index c5e06bf52d352..287494efda9be 100644
    if (FAILED(hr)) {
      return false;
    }
+@@ -1339,7 +1339,11 @@ std::optional<std::wstring> GetSerialNumber() {
+   Microsoft::WRL::ComPtr<ABI::Windows::System::Profile::SystemManufacturers::
+                              ISmbiosInformationStatics>
+       symbios_information_statics;
+-  HRESULT hr = ::RoGetActivationFactory(
++  if (!ResolveCoreWinRTDelayload()) {
++    return std::nullopt;
++  }
++
++  HRESULT hr = win::RoGetActivationFactory(
+       base::win::HStringReference(
+           RuntimeClass_Windows_System_Profile_SystemManufacturers_SmbiosInformation)
+           .Get(),
 diff --git a/base/win/winrt_storage_util_unittest.cc b/base/win/winrt_storage_util_unittest.cc
 index 5c54819e4b85a..8f3f64f29011a 100644
 --- a/base/win/winrt_storage_util_unittest.cc

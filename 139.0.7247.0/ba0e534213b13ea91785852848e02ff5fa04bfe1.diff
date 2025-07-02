@@ -219,6 +219,16 @@ index 287494efda9be..f70564db998d0 100644
      return false;
    }
  
+@@ -1339,7 +1339,8 @@ std::optional<std::wstring> GetSerialNumber() {
+   Microsoft::WRL::ComPtr<ABI::Windows::System::Profile::SystemManufacturers::
+                              ISmbiosInformationStatics>
+       symbios_information_statics;
+-  if (!ResolveCoreWinRTDelayload()) {
++  if (!ResolveCoreWinRTDelayload() ||
++      !ScopedHString::ResolveCoreWinRTStringDelayload()) {
+     return std::nullopt;
+   }
+ 
 diff --git a/base/win/winrt_storage_util_unittest.cc b/base/win/winrt_storage_util_unittest.cc
 index 8f3f64f29011a..285e8775529b8 100644
 --- a/base/win/winrt_storage_util_unittest.cc

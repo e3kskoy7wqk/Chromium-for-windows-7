@@ -64,8 +64,8 @@ index 4210e04907540..97ce9aca28483 100644
    if (background_color.has_value()) {
      constexpr int background_corner_radius = 8;
 -    constexpr int button_background_vertical_size = 40;
-     button->SetBackground(views::CreateRoundedRectBackground(
-         *background_color, gfx::RoundedCornersF(background_corner_radius),
+     button->SetBackground(std::make_unique<RoundedRectBackground>(
+         *background_color, background_corner_radius,
          gfx::Insets::VH(0, kIdentityContainerMargin)));
      // Button with a background should have a larger size to fit the background.
      button->SetPreferredSize(
@@ -163,6 +163,6 @@ index c35a62385d29d..3781f8ac24003 100644
 -      std::unique_ptr<views::View> icon_view,
 -      const std::u16string& text);
 -
-   const raw_ref<Profile> profile_;
-   const raw_ptr<views::Button> anchor_button_;
+   const raw_ptr<Browser> browser_;
  
+   const raw_ptr<views::Button> anchor_button_;
