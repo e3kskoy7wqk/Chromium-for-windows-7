@@ -1,0 +1,13 @@
+diff --git a/base/files/file_util_win.cc b/base/files/file_util_win.cc
+index d5c2512aae1f6..300093a576a9a 100644
+--- a/base/files/file_util_win.cc
++++ b/base/files/file_util_win.cc
+@@ -754,7 +754,7 @@ bool CreateNewTempDirectory(const FilePath::StringType& prefix,
+   DCHECK(new_temp_path);
+ 
+   FilePath parent_dir;
+-  if (IsUserDefaultAdmin() && PathService::Get(DIR_SYSTEM_TEMP, &parent_dir) &&
++  if (FALSE && PathService::Get(DIR_SYSTEM_TEMP, &parent_dir) &&
+       CreateTemporaryDirInDir(parent_dir,
+                               prefix.empty() ? kDefaultTempDirPrefix : prefix,
+                               new_temp_path)) {

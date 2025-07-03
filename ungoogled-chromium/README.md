@@ -103,7 +103,7 @@ Open a command prompt and
      - `ungoogled-chromium/windows/windows-fix-generate-resource-allowed-list.patch`
      - `ungoogled-chromium/windows/windows-fix-building-with-rust.patch`
 
-   - Modify `%_ROOT_DIR%\ungoogled-chromium\patches\core\ungoogled-chromium\fix-building-with-prunned-binaries.patch` by removing any content related to `services/passage_embeddings/passage_embeddings_service.cc` and `services/passage_embeddings/passage_embeddings_service.h`.
+   - Modify `%_ROOT_DIR%\ungoogled-chromium\patches\core\ungoogled-chromium\fix-building-with-prunned-binaries.patch` by removing any content related to `services/passage_embeddings/passage_embeddings_service.cc`, `services/passage_embeddings/passage_embeddings_service.h` and `chrome/browser/permissions/BUILD.gn`.
 
 9. Apply patches
 

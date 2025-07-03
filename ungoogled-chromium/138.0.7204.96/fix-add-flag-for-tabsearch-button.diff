@@ -1,0 +1,26 @@
+--- a/chrome/browser/ui/browser_window/browser_window_features.cc
++++ b/chrome/browser/ui/browser_window/browser_window_features.cc
+@@ -6,6 +6,7 @@
+ 
+ #include <memory>
+ 
++#include "base/command_line.h"
+ #include "base/check_is_test.h"
+ #include "base/feature_list.h"
+ #include "base/memory/ptr_util.h"
+@@ -273,6 +274,7 @@ void BrowserWindowFeatures::InitPostBrowserViewConstruction(
+   // some unit tests without browser view.
+   if (browser_view->GetIsNormalType()) {
+ #if BUILDFLAG(ENABLE_GLIC)
++  if (!base::CommandLine::ForCurrentProcess()->HasSwitch("remove-tabsearch-button")) {
+     glic::GlicKeyedService* glic_service =
+         glic::GlicKeyedService::Get(browser_view->GetProfile());
+     if (glic_service) {
+@@ -279,6 +281,7 @@ void BrowserWindowFeatures::InitPostBrowserViewConstruction(
+           browser_view->tab_strip_region_view()->GetTabStripActionContainer(),
+           glic_service);
+     }
++  }
+ #endif
+ 
+     memory_saver_opt_in_iph_controller_ =
