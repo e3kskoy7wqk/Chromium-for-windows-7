@@ -1,0 +1,1110 @@
+
+
+diff --git a/chrome/browser/themes/theme_helper_win.cc b/chrome/browser/themes/theme_helper_win.cc
+index 4ee580cc7a3ff..1bf2b5a469145 100644
+--- a/chrome/browser/themes/theme_helper_win.cc
++++ b/chrome/browser/themes/theme_helper_win.cc
+@@ -8,6 +8,8 @@
+ #include "chrome/browser/win/mica_titlebar.h"
+ #include "chrome/browser/win/titlebar_config.h"
+ #include "chrome/grit/theme_resources.h"
++#include "skia/ext/skia_utils_win.h"
++#include "ui/base/win/shell.h"
+ 
+ int ThemeHelperWin::GetDefaultDisplayProperty(int id) const {
+   if (id == ThemeProperties::SHOULD_FILL_BACKGROUND_TAB_COLOR) {
+@@ -19,6 +21,8 @@ int ThemeHelperWin::GetDefaultDisplayProperty(int id) const {
+ 
+ bool ThemeHelperWin::ShouldUseNativeFrame(
+     const CustomThemeSupplier* theme_supplier) const {
+-  return !ShouldAlwaysUseSystemTitlebar() ||
+-         !HasCustomImage(IDR_THEME_FRAME, theme_supplier);
++  const bool use_native_frame_if_enabled =
++      !ShouldAlwaysUseSystemTitlebar() ||
++      !HasCustomImage(IDR_THEME_FRAME, theme_supplier);
++  return use_native_frame_if_enabled && ui::win::IsAeroGlassEnabled();
+ }
+diff --git a/chrome/browser/ui/color/win/native_chrome_color_mixer_win.cc b/chrome/browser/ui/color/win/native_chrome_color_mixer_win.cc
+index d5b419d91a933..a9521f587881e 100644
+--- a/chrome/browser/ui/color/win/native_chrome_color_mixer_win.cc
++++ b/chrome/browser/ui/color/win/native_chrome_color_mixer_win.cc
+@@ -16,5 +16,6 @@
+ #include "chrome/browser/win/titlebar_config.h"
+ #include "chrome/grit/theme_resources.h"
++#include "ui/base/win/shell.h"
+ #include "ui/color/color_id.h"
+ #include "ui/color/color_mixer.h"
+ #include "ui/color/color_provider.h"
+@@ -222,8 +223,10 @@ bool FrameColorHelper::HasCustomImage(
+ 
+ bool FrameColorHelper::DwmColorsAllowed(
+     const ui::ColorProviderKey& key) const {
+-  return !ShouldAlwaysUseSystemTitlebar() ||
+-         !HasCustomImage(IDR_THEME_FRAME, key);
++  const bool use_native_frame_if_enabled =
++      (!ShouldAlwaysUseSystemTitlebar() ||
++       !HasCustomImage(IDR_THEME_FRAME, key));
++  return use_native_frame_if_enabled && ui::win::IsAeroGlassEnabled();
+ }
+ 
+ color_utils::HSL FrameColorHelper::GetTint(
+diff --git a/chrome/browser/ui/views/apps/chrome_native_app_window_views_win.cc b/chrome/browser/ui/views/apps/chrome_native_app_window_views_win.cc
+index 4db57035015b6..f28e0622a2fe0 100644
+--- a/chrome/browser/ui/views/apps/chrome_native_app_window_views_win.cc
++++ b/chrome/browser/ui/views/apps/chrome_native_app_window_views_win.cc
+@@ -23,9 +23,11 @@
+ #include "ui/views/widget/desktop_aura/desktop_native_widget_aura.h"
+ #include "ui/views/win/hwnd_util.h"
+ 
+-ChromeNativeAppWindowViewsWin::ChromeNativeAppWindowViewsWin() = default;
++ChromeNativeAppWindowViewsWin::ChromeNativeAppWindowViewsWin()
++    : frame_view_(nullptr), is_translucent_(false) {}
+ 
+-ChromeNativeAppWindowViewsWin::~ChromeNativeAppWindowViewsWin() = default;
++ChromeNativeAppWindowViewsWin::~ChromeNativeAppWindowViewsWin() {
++}
+ 
+ HWND ChromeNativeAppWindowViewsWin::GetNativeAppWindowHWND() const {
+   return views::HWNDForWidget(widget()->GetTopLevelWidget());
+@@ -77,9 +79,14 @@ void ChromeNativeAppWindowViewsWin::InitializeDefaultWindow(
+ 
+ std::unique_ptr<views::NonClientFrameView>
+ ChromeNativeAppWindowViewsWin::CreateStandardDesktopAppFrame() {
+-  auto frame_view = std::make_unique<AppWindowFrameViewWin>(widget());
+-  frame_view_ = frame_view.get();
+-  return frame_view;
++  if (ui::win::IsAeroGlassEnabled()) {
++    auto frame_view =
++        std::make_unique<AppWindowFrameViewWin>(widget());
++    frame_view_ = frame_view.get();
++    return frame_view;
++  }
++  frame_view_ = nullptr;
++  return ChromeNativeAppWindowViewsAura::CreateStandardDesktopAppFrame();
+ }
+ 
+ bool ChromeNativeAppWindowViewsWin::CanMinimize() const {
+diff --git a/chrome/browser/ui/views/apps/chrome_native_app_window_views_win.h b/chrome/browser/ui/views/apps/chrome_native_app_window_views_win.h
+index f35610defe10e..d888781e3782c 100644
+--- a/chrome/browser/ui/views/apps/chrome_native_app_window_views_win.h
++++ b/chrome/browser/ui/views/apps/chrome_native_app_window_views_win.h
+@@ -48,16 +48,17 @@ class ChromeNativeAppWindowViewsWin : public ChromeNativeAppWindowViewsAura {
+   // Overridden from views::WidgetDelegate:
+   bool CanMinimize() const override;
+ 
+-  // Populated if there is a standard desktop app frame, which provides special
+-  // information to the native widget implementation. This will be NULL if the
+-  // frame is a non-standard app frame created by CreateNonStandardAppFrame.
+-  raw_ptr<AppWindowFrameViewWin> frame_view_ = nullptr;
++  // Populated if there is a glass frame, which provides special information
++  // to the native widget implementation. This will be NULL if there is no
++  // glass frame. Note, this can change from NULL to non-NULL and back again
++  // throughout the life of a window, e.g. if DWM is enabled and disabled.
++  raw_ptr<AppWindowFrameViewWin> frame_view_;
+ 
+   // The Windows Application User Model ID identifying the app.
+   std::wstring app_model_id_;
+ 
+   // Whether the InitParams indicated that this window should be translucent.
+-  bool is_translucent_ = false;
++  bool is_translucent_;
+ 
+   base::WeakPtrFactory<ChromeNativeAppWindowViewsWin> weak_ptr_factory_{this};
+ };
+diff --git a/chrome/browser/ui/views/chrome_views_delegate_win.cc b/chrome/browser/ui/views/chrome_views_delegate_win.cc
+index 6ae07ebe080de..5f02fcfcfabb3 100644
+--- a/chrome/browser/ui/views/chrome_views_delegate_win.cc
++++ b/chrome/browser/ui/views/chrome_views_delegate_win.cc
+@@ -15,6 +15,7 @@
+ #include "chrome/browser/win/app_icon.h"
+ #include "components/keep_alive_registry/scoped_keep_alive.h"
+ #include "ui/views/widget/widget_delegate.h"
++#include "ui/base/win/shell.h"
+ 
+ namespace {
+ 
+@@ -132,10 +133,20 @@ views::NativeWidget* ChromeViewsDelegate::CreateNativeWidget(
+     // TODO: This may no longer be needed if we get proper elevation-based
+     // shadows on toplevel windows. See https://crbug.com/838667.
+     native_widget_type = NativeWidgetType::NATIVE_WIDGET_AURA;
++  } else if (!ui::win::IsAeroGlassEnabled()) {
++    // If we don't have composition (either because Glass is not enabled or
++    // because it was disabled at the command line), anything that requires
++    // transparency will be broken with a toplevel window, so force the use of
++    // a non toplevel window.
++    if (params->opacity ==
++            views::Widget::InitParams::WindowOpacity::kTranslucent &&
++        !params->force_software_compositing)
++      native_widget_type = NativeWidgetType::NATIVE_WIDGET_AURA;
+   } else {
+-    // Otherwise, we can use a toplevel window (they get blended via
+-    // WS_EX_COMPOSITED, which allows for animation effects, and for exceeding
+-    // the bounds of the parent window).
++    // If we're on Vista+ with composition enabled, then we can use toplevel
++    // windows for most things (they get blended via WS_EX_COMPOSITED, which
++    // allows for animation effects, but also exceeding the bounds of the parent
++    // window).
+     if (params->parent &&
+         params->type != views::Widget::InitParams::TYPE_CONTROL &&
+         params->type != views::Widget::InitParams::TYPE_WINDOW) {
+diff --git a/chrome/browser/ui/views/frame/browser_non_client_frame_view_unittest.cc b/chrome/browser/ui/views/frame/browser_non_client_frame_view_unittest.cc
+index fd4b2577b9e36..cd908d5fa4b24 100644
+--- a/chrome/browser/ui/views/frame/browser_non_client_frame_view_unittest.cc
++++ b/chrome/browser/ui/views/frame/browser_non_client_frame_view_unittest.cc
+@@ -4,6 +4,7 @@
+ 
+ #include "chrome/browser/ui/views/frame/browser_non_client_frame_view.h"
+ 
++#include "base/command_line.h"
+ #include "base/functional/bind.h"
+ #include "base/memory/raw_ptr.h"
+ #include "build/build_config.h"
+@@ -23,7 +24,7 @@
+ class BrowserNonClientFrameViewTest : public TestWithBrowserView {
+  public:
+   explicit BrowserNonClientFrameViewTest(Browser::Type type)
+-      : TestWithBrowserView(type) {}
++      : TestWithBrowserView(type), frame_view_(nullptr) {}
+ 
+   BrowserNonClientFrameViewTest(const BrowserNonClientFrameViewTest&) = delete;
+   BrowserNonClientFrameViewTest& operator=(
+@@ -31,6 +32,11 @@ class BrowserNonClientFrameViewTest : public TestWithBrowserView {
+ 
+   // TestWithBrowserView override:
+   void SetUp() override {
++#if BUILDFLAG(IS_WIN)
++    // Use opaque frame.
++    base::CommandLine::ForCurrentProcess()->AppendSwitch(
++        switches::kDisableDwmComposition);
++#endif
+     TestWithBrowserView::SetUp();
+     views::Widget* widget = browser_view()->GetWidget();
+     frame_view_ = static_cast<BrowserNonClientFrameView*>(
+diff --git a/chrome/browser/ui/views/frame/minimize_button_metrics_win.cc b/chrome/browser/ui/views/frame/minimize_button_metrics_win.cc
+index 7dc587a1ddbcf..1e9aa01bc1db1 100644
+--- a/chrome/browser/ui/views/frame/minimize_button_metrics_win.cc
++++ b/chrome/browser/ui/views/frame/minimize_button_metrics_win.cc
+@@ -8,6 +8,7 @@
+ 
+ #include "base/check.h"
+ #include "base/i18n/rtl.h"
++#include "ui/base/win/shell.h"
+ #include "ui/display/win/screen_win.h"
+ #include "ui/gfx/geometry/point.h"
+ 
+@@ -138,11 +139,11 @@ int MinimizeButtonMetrics::GetMinimizeButtonOffsetX() const {
+   // WM_NCACTIVATE (maybe it returns classic values?). In an attempt to return a
+   // consistant value we cache the last value across instances and use it until
+   // we get the activate.
+-  if (was_activated_ || cached_minimize_button_x_delta_ == 0) {
++  if (was_activated_ || !ui::win::IsAeroGlassEnabled() ||
++      cached_minimize_button_x_delta_ == 0) {
+     const int minimize_button_offset = GetAndCacheMinimizeButtonOffsetX();
+-    if (minimize_button_offset > 0) {
++    if (minimize_button_offset > 0)
+       return minimize_button_offset;
+-    }
+   }
+ 
+   // If we fail to get the minimize button offset via the WM_GETTITLEBARINFOEX
+diff --git a/chrome/browser/ui/views/tabs/tab_hover_card_bubble_view.cc b/chrome/browser/ui/views/tabs/tab_hover_card_bubble_view.cc
+index 73dff477f2b4c..5da50c8b58d7a 100644
+--- a/chrome/browser/ui/views/tabs/tab_hover_card_bubble_view.cc
++++ b/chrome/browser/ui/views/tabs/tab_hover_card_bubble_view.cc
+@@ -24,6 +24,7 @@
+ #include "chrome/browser/ui/tabs/tab_style.h"
+ #include "chrome/browser/ui/thumbnails/thumbnail_image.h"
+ #include "chrome/browser/ui/ui_features.h"
++#include "chrome/browser/ui/views/chrome_layout_provider.h"
+ #include "chrome/browser/ui/views/chrome_typography.h"
+ #include "chrome/browser/ui/views/tabs/fade_label_view.h"
+ #include "chrome/browser/ui/views/tabs/filename_elider.h"
+@@ -64,6 +65,10 @@
+ #include "ui/views/view_class_properties.h"
+ #include "ui/views/widget/widget.h"
+ 
++#if BUILDFLAG(IS_WIN)
++#include "ui/base/win/shell.h"
++#endif
++
+ namespace {
+ 
+ // Maximum number of lines that a title label occupies.
+@@ -78,6 +83,14 @@ constexpr auto kAlertMargins =
+ // Margins space surrounding the text (title and domain) in the hover card.
+ constexpr auto kTextMargins = gfx::Insets::VH(12, 12);
+ 
++bool CustomShadowsSupported() {
++#if BUILDFLAG(IS_WIN)
++  return ui::win::IsAeroGlassEnabled();
++#else
++  return true;
++#endif
++}
++
+ // Calculates an appropriate size to display a preview image in the hover card.
+ // For the vast majority of images, the `preferred_size` is used, but extremely
+ // tall or wide images use the image size instead, centering in the available
+@@ -356,6 +369,10 @@ TabHoverCardBubbleView::TabHoverCardBubbleView(Tab* tab)
+                                views::BubbleBorder::STANDARD_SHADOW),
+       tab_style_(TabStyle::Get()),
+       bubble_params_(params) {
++  if (CustomShadowsSupported()) {
++    corner_radius_ = ChromeLayoutProvider::Get()->GetCornerRadiusMetric(
++        views::Emphasis::kHigh);
++  }
+   SetButtons(static_cast<int>(ui::mojom::DialogButton::kNone));
+ 
+   // Remove the accessible role so that hover cards are not read when they
+@@ -394,7 +411,7 @@ TabHoverCardBubbleView::TabHoverCardBubbleView(Tab* tab)
+   if (bubble_params_.show_image_preview) {
+     thumbnail_view_ = AddChildView(std::make_unique<ThumbnailView>(this));
+     thumbnail_view_->SetAnimationEnabled(bubble_params_.use_animation);
+-    thumbnail_view_->SetRoundedCorners(true, corner_radius_);
++    thumbnail_view_->SetRoundedCorners(true, corner_radius_.value_or(0));
+   }
+ 
+   footer_view_ = AddChildView(std::make_unique<FooterView>());
+@@ -462,7 +479,8 @@ TabHoverCardBubbleView::TabHoverCardBubbleView(Tab* tab)
+       views::BubbleFrameView::PreferredArrowAdjustment::kOffset);
+   GetBubbleFrameView()->set_hit_test_transparent(true);
+ 
+-  GetBubbleFrameView()->SetRoundedCorners(gfx::RoundedCornersF(corner_radius_));
++  if (using_rounded_corners())
++    GetBubbleFrameView()->SetRoundedCorners(gfx::RoundedCornersF(corner_radius_.value()));
+ 
+   // Placeholder image should be used when there is no image data for the
+   // given tab. Otherwise don't flash the placeholder while we wait for the
+@@ -572,7 +590,7 @@ void TabHoverCardBubbleView::UpdateCardContent(const Tab* tab) {
+ 
+   if (thumbnail_view_) {
+     // We only clip the corners of the fade image when there isn't a footer.
+-    thumbnail_view_->SetRoundedCorners(!show_footer, corner_radius_);
++    thumbnail_view_->SetRoundedCorners(!show_footer, corner_radius_.value_or(0));
+   }
+ }
+ 
+@@ -643,5 +661,16 @@ gfx::Size TabHoverCardBubbleView::CalculatePreferredSize() const {
+   return preferred_size;
+ }
+ 
++void TabHoverCardBubbleView::OnThemeChanged() {
++  BubbleDialogDelegateView::OnThemeChanged();
++
++  // Bubble closes if the theme changes to the point where the border has to be
++  // regenerated. See crbug.com/1140256
++  if (using_rounded_corners() != CustomShadowsSupported()) {
++    GetWidget()->Close();
++    return;
++  }
++}
++
+ BEGIN_METADATA(TabHoverCardBubbleView)
+ END_METADATA
+diff --git a/chrome/browser/ui/views/tabs/tab_hover_card_bubble_view.h b/chrome/browser/ui/views/tabs/tab_hover_card_bubble_view.h
+index c50e5742c13f2..fc80fd937585b 100644
+--- a/chrome/browser/ui/views/tabs/tab_hover_card_bubble_view.h
++++ b/chrome/browser/ui/views/tabs/tab_hover_card_bubble_view.h
+@@ -17,5 +17,4 @@
+ #include "base/time/time.h"
+ #include "chrome/browser/ui/tabs/tab_enums.h"
+ #include "chrome/browser/ui/tabs/tab_utils.h"
+-#include "chrome/browser/ui/views/chrome_layout_provider.h"
+ #include "chrome/browser/ui/views/tabs/fade_footer_view.h"
+@@ -82,7 +81,10 @@ class TabHoverCardBubbleView : public views::BubbleDialogDelegateView {
+ 
++  bool using_rounded_corners() const { return corner_radius_.has_value(); }
++
+   // views::BubbleDialogDelegateView:
+   gfx::Size CalculatePreferredSize(
+       const views::SizeBounds& available_size) const override;
++  void OnThemeChanged() override;
+ 
+   raw_ptr<FadeLabelView> title_label_ = nullptr;
+   raw_ptr<FadeLabelView> domain_label_ = nullptr;
+@@ -94,7 +96,6 @@ class TabHoverCardBubbleView : public views::BubbleDialogDelegateView {
+ 
+   const InitParams bubble_params_;
+-  int corner_radius_ = ChromeLayoutProvider::Get()->GetCornerRadiusMetric(
+-      views::Emphasis::kHigh);
++  std::optional<int> corner_radius_;
+ };
+ 
+ #endif  // CHROME_BROWSER_UI_VIEWS_TABS_TAB_HOVER_CARD_BUBBLE_VIEW_H_
+diff --git a/chrome/browser/ui/views/toolbar/toolbar_action_hover_card_bubble_view.cc b/chrome/browser/ui/views/toolbar/toolbar_action_hover_card_bubble_view.cc
+index 5b1b0ac3f6105..549f458b83d99 100644
+--- a/chrome/browser/ui/views/toolbar/toolbar_action_hover_card_bubble_view.cc
++++ b/chrome/browser/ui/views/toolbar/toolbar_action_hover_card_bubble_view.cc
+@@ -25,6 +25,10 @@
+ #include "ui/views/style/typography.h"
+ #include "ui/views/view_class_properties.h"
+ 
++#if BUILDFLAG(IS_WIN)
++#include "ui/base/win/shell.h"
++#endif
++
+ namespace {
+ 
+ using HoverCardState = ToolbarActionViewController::HoverCardState;
+@@ -42,6 +46,14 @@ constexpr int kVerticalMargin = 12;
+ // Maximum number of lines that a label occupies.
+ constexpr int kHoverCardLabelMaxLines = 3;
+ 
++bool CustomShadowsSupported() {
++#if BUILDFLAG(IS_WIN)
++  return ui::win::IsAeroGlassEnabled();
++#else
++  return true;
++#endif
++}
++
+ std::u16string GetSiteAccessTitle(
+     ToolbarActionViewController::HoverCardState::SiteAccess state) {
+   int title_id = -1;
+@@ -152,8 +164,10 @@ ToolbarActionHoverCardBubbleView::ToolbarActionHoverCardBubbleView(
+   layout->SetCrossAxisAlignment(views::LayoutAlignment::kStretch);
+   layout->SetCollapseMargins(true);
+ 
+-  corner_radius_ = ChromeLayoutProvider::Get()->GetCornerRadiusMetric(
+-      views::Emphasis::kHigh);
++  if (CustomShadowsSupported()) {
++    corner_radius_ = ChromeLayoutProvider::Get()->GetCornerRadiusMetric(
++        views::Emphasis::kHigh);
++  }
+ 
+   // Set up content.
+   auto create_label = [](int context, int text_style,
+@@ -316,7 +330,7 @@ void ToolbarActionHoverCardBubbleView::OnThemeChanged() {
+ 
+   // Bubble closes if the theme changes to the point where the border has to be
+   // regenerated. See crbug.com/1140256
+-  if (!using_rounded_corners()) {
++  if (using_rounded_corners() != CustomShadowsSupported()) {
+     GetWidget()->Close();
+     return;
+   }
+diff --git a/content/browser/gpu/gpu_internals_ui.cc b/content/browser/gpu/gpu_internals_ui.cc
+index 65b12e86320c4..cea6eadb67435 100644
+--- a/content/browser/gpu/gpu_internals_ui.cc
++++ b/content/browser/gpu/gpu_internals_ui.cc
+@@ -60,6 +60,7 @@
+ 
+ #if BUILDFLAG(IS_WIN)
+ #include "base/win/windows_version.h"
++#include "ui/base/win/shell.h"
+ #include "ui/gfx/win/physical_size.h"
+ #endif
+ 
+@@ -164,8 +165,10 @@ base::Value::List GetBasicGpuInfo(const gpu::GPUInfo& gpu_info,
+   basic_info.Append(display::BuildGpuInfoEntry(
+       "AMD switchable", base::Value(gpu_info.amd_switchable)));
+ #if BUILDFLAG(IS_WIN)
++  std::string compositor =
++      ui::win::IsAeroGlassEnabled() ? "Aero Glass" : "none";
+   basic_info.Append(
+-      display::BuildGpuInfoEntry("Desktop compositing", "Aero Glass"));
++      display::BuildGpuInfoEntry("Desktop compositing", compositor));
+ 
+   basic_info.Append(display::BuildGpuInfoEntry(
+       "Direct composition",
+diff --git a/extensions/browser/api/app_window/app_window_apitest.cc b/extensions/browser/api/app_window/app_window_apitest.cc
+index 6df8593550e8d..95f0eeed2a498 100644
+--- a/extensions/browser/api/app_window/app_window_apitest.cc
++++ b/extensions/browser/api/app_window/app_window_apitest.cc
+@@ -25,6 +25,10 @@
+ #include "ui/base/base_window.h"
+ #include "ui/gfx/geometry/rect.h"
+ 
++#if BUILDFLAG(IS_WIN)
++#include "ui/base/win/shell.h"
++#endif
++
+ namespace extensions {
+ 
+ using AppWindowApiTest = PlatformAppBrowserTest;
+@@ -143,6 +147,12 @@ IN_PROC_BROWSER_TEST_F(AppWindowApiTest, MAYBE_AlphaEnabledHasPermissions) {
+ 
+ #if defined(USE_AURA) && !BUILDFLAG(IS_LINUX)
+   test_dir = kHasAlphaDir;
++
++#if BUILDFLAG(IS_WIN)
++  if (!ui::win::IsAeroGlassEnabled()) {
++    test_dir = kNoAlphaDir;
++  }
++#endif  // BUILDFLAG(IS_WIN)
+ #endif  // USE_AURA && !BUILDFLAG(IS_LINUX)
+ 
+   EXPECT_TRUE(RunExtensionTest(test_dir, {.launch_as_platform_app = true}))
+diff --git a/ui/base/ui_base_switches.cc b/ui/base/ui_base_switches.cc
+index 514bb3cdb580d..8fa3338f9d28c 100644
+--- a/ui/base/ui_base_switches.cc
++++ b/ui/base/ui_base_switches.cc
+@@ -45,6 +45,9 @@ const char kUiToolkitFlag[] = "ui-toolkit";
+ const char kDisableGtkIme[] = "disable-gtk-ime";
+ #endif
+ 
++// Disables use of DWM composition for top level windows.
++const char kDisableDwmComposition[] = "disable-dwm-composition";
++
+ // Disable re-use of non-exact resources to fulfill ResourcePool requests.
+ // Intended only for use in layout or pixel tests to reduce noise.
+ const char kDisallowNonExactResourceReuse[] =
+diff --git a/ui/base/ui_base_switches.h b/ui/base/ui_base_switches.h
+index ec664b866c5d2..1479400cff1bb 100644
+--- a/ui/base/ui_base_switches.h
++++ b/ui/base/ui_base_switches.h
+@@ -36,5 +36,6 @@ COMPONENT_EXPORT(UI_BASE) extern const char kUiToolkitFlag[];
+ #endif
+ 
++COMPONENT_EXPORT(UI_BASE) extern const char kDisableDwmComposition[];
+ COMPONENT_EXPORT(UI_BASE) extern const char kDisableTouchDragDrop[];
+ COMPONENT_EXPORT(UI_BASE) extern const char kDRMVirtualConnectorIsExternal[];
+ COMPONENT_EXPORT(UI_BASE) extern const char kEnableTouchDragDrop[];
+diff --git a/ui/base/win/shell.cc b/ui/base/win/shell.cc
+index f4aaa344ac77f..be13d768c55c3 100644
+--- a/ui/base/win/shell.cc
++++ b/ui/base/win/shell.cc
+@@ -11,6 +11,7 @@
+ #include <shellapi.h>
+ #include <wrl/client.h>
+ 
++#include "base/command_line.h"
+ #include "base/debug/alias.h"
+ #include "base/files/file.h"
+ #include "base/files/file_path.h"
+@@ -177,4 +178,15 @@ void ClearWindowPropertyStore(HWND hwnd) {
+   DCHECK(FAILED(pps->GetCount(&property_count)) || property_count == 0);
+ }
+ 
++bool IsAeroGlassEnabled() {
++  // For testing in Win8+ (where it is not possible to disable composition) the
++  // user can specify this command line switch to mimic the behavior.  In this
++  // mode, cross-HWND transparency is not supported and various types of
++  // widgets fallback to more simplified rendering behavior.
++  // TODO(https://crbug.com/1385856): See if this switch and the code to support
++  // it can be removed.
++  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
++      switches::kDisableDwmComposition);
++}
++
+ }  // namespace ui::win
+diff --git a/ui/base/win/shell.h b/ui/base/win/shell.h
+index 043abb1452e00..d7e5e7bbb252e 100644
+--- a/ui/base/win/shell.h
++++ b/ui/base/win/shell.h
+@@ -75,6 +75,11 @@ void SetRelaunchDetailsForWindow(const std::wstring& relaunch_command,
+ // Clears the Window Property Store on an HWND.
+ COMPONENT_EXPORT(UI_BASE) void ClearWindowPropertyStore(HWND hwnd);
+ 
++// Returns true if dwm composition is available and turned on on the current
++// platform.
++// This method supports a command-line override for testing.
++COMPONENT_EXPORT(UI_BASE) bool IsAeroGlassEnabled();
++
+ }  // namespace ui::win
+ 
+ #endif  // UI_BASE_WIN_SHELL_H_
+diff --git a/ui/message_center/views/message_view.cc b/ui/message_center/views/message_view.cc
+index eb8af79a5086f..edd03b3287df9 100644
+--- a/ui/message_center/views/message_view.cc
++++ b/ui/message_center/views/message_view.cc
+@@ -42,13 +42,17 @@
+ #include "base/time/time.h"
+ #endif
+ 
++#if BUILDFLAG(IS_WIN)
++#include "ui/base/win/shell.h"
++#endif
++
+ namespace message_center {
+ 
+ namespace {
+ 
+ bool ShouldShowAeroShadowBorder() {
+ #if BUILDFLAG(IS_WIN)
+-  return true;
++  return ui::win::IsAeroGlassEnabled();
+ #else
+   return false;
+ #endif
+diff --git a/ui/platform_window/win/win_window.cc b/ui/platform_window/win/win_window.cc
+index c264c751268dd..ce2896220d495 100644
+--- a/ui/platform_window/win/win_window.cc
++++ b/ui/platform_window/win/win_window.cc
+@@ -14,6 +14,7 @@
+ #include "base/notreached.h"
+ #include "base/strings/string_util_win.h"
+ #include "ui/base/cursor/platform_cursor.h"
++#include "ui/base/win/shell.h"
+ #include "ui/base/win/win_cursor.h"
+ #include "ui/events/event.h"
+ #include "ui/events/event_utils.h"
+@@ -186,9 +187,9 @@ bool WinWindow::ShouldWindowContentsBeTransparent() const {
+   // by the DWM rather than Chrome, so that area can show through.  This
+   // function does not describe the transparency of the whole window appearance,
+   // but merely of the content Chrome draws, so even when the system titlebars
+-  // appear opaque, the content above them needs to be transparent, or they'll
+-  // be covered by a black (undrawn) region.
+-  return !IsFullscreen();
++  // appear opaque (Win 8+), the content above them needs to be transparent, or
++  // they'll be covered by a black (undrawn) region.
++  return ui::win::IsAeroGlassEnabled() && !IsFullscreen();
+ }
+ 
+ void WinWindow::SetZOrderLevel(ZOrderLevel order) {
+diff --git a/ui/views/bubble/bubble_border.cc b/ui/views/bubble/bubble_border.cc
+index e0a72e9d2c30f..77cd07625ff88 100644
+--- a/ui/views/bubble/bubble_border.cc
++++ b/ui/views/bubble/bubble_border.cc
+@@ -340,8 +340,8 @@ gfx::Rect BubbleBorder::GetBounds(const gfx::Rect& anchor_rect,
+ 
+   // With NO_SHADOW, there should be further insets, but the same logic is
+   // used to position the bubble origin according to |anchor_rect|.
+-  DCHECK(!IsExplicitNoShadow(shadow_) || insets_.has_value() ||
+-         shadow_insets.IsEmpty() || visible_arrow_);
++  DCHECK((!IsExplicitNoShadow(shadow_) && shadow_ != NO_SHADOW_LEGACY) ||
++         insets_.has_value() || shadow_insets.IsEmpty() || visible_arrow_);
+   if (!avoid_shadow_overlap_) {
+     contents_bounds.Inset(-shadow_insets);
+   }
+@@ -441,13 +441,17 @@ void BubbleBorder::Paint(const views::View& view, gfx::Canvas* canvas) {
+     return;
+   }
+ 
+-  gfx::ScopedCanvas scoped(canvas);
+-  SkRRect r_rect = GetClientRect(view);
+-  canvas->sk_canvas()->clipRRect(r_rect, SkClipOp::kDifference,
+-                                 true /*doAntiAlias*/);
+-  DrawBorderAndShadowImpl(r_rect, &cc::PaintCanvas::drawRRect, canvas,
+-                          view.GetColorProvider(), ShouldDrawStroke(),
+-                          md_shadow_elevation_, shadow_);
++  if (shadow_ == NO_SHADOW_LEGACY) {
++    PaintNoShadowLegacy(view, canvas);
++  } else {
++    gfx::ScopedCanvas scoped(canvas);
++    SkRRect r_rect = GetClientRect(view);
++    canvas->sk_canvas()->clipRRect(r_rect, SkClipOp::kDifference,
++                                   true /*doAntiAlias*/);
++    DrawBorderAndShadowImpl(r_rect, &cc::PaintCanvas::drawRRect, canvas,
++                            view.GetColorProvider(), ShouldDrawStroke(),
++                            md_shadow_elevation_, shadow_);
++  }
+ 
+   if (visible_arrow_) {
+     PaintVisibleArrow(view, canvas);
+@@ -471,6 +475,9 @@ gfx::Insets BubbleBorder::GetInsets() const {
+   gfx::Insets insets;
+ 
+   switch (shadow_) {
++    case NO_SHADOW_LEGACY:
++      insets = gfx::Insets(kBorderThicknessDip);
++      break;
+     case STANDARD_SHADOW:
+ #if BUILDFLAG(IS_CHROMEOS)
+     case CHROMEOS_SYSTEM_UI_SHADOW:
+@@ -700,6 +707,19 @@ void BubbleBorder::PaintNoShadow(const View& view, gfx::Canvas* canvas) {
+   canvas->sk_canvas()->drawColor(SkColors::kTransparent, SkBlendMode::kSrc);
+ }
+ 
++void BubbleBorder::PaintNoShadowLegacy(const View& view, gfx::Canvas* canvas) {
++  gfx::RectF bounds(view.GetLocalBounds());
++  bounds.Inset(gfx::InsetsF(kBorderThicknessDip / 2.0f));
++  cc::PaintFlags flags;
++  flags.setAntiAlias(true);
++  flags.setStyle(cc::PaintFlags::kStroke_Style);
++  flags.setStrokeWidth(kBorderThicknessDip);
++  SkColor kBorderColor =
++      view.GetColorProvider()->GetColor(ui::kColorBubbleBorder);
++  flags.setColor(kBorderColor);
++  canvas->DrawRoundRect(bounds, 0, flags);
++}
++
+ void BubbleBorder::PaintVisibleArrow(const View& view, gfx::Canvas* canvas) {
+   gfx::Point arrow_origin = visible_arrow_rect_.origin();
+   View::ConvertPointFromScreen(&view, &arrow_origin);
+diff --git a/ui/views/bubble/bubble_border.h b/ui/views/bubble/bubble_border.h
+index 9ca2a57089fcf..a7adab8e4d94c 100644
+--- a/ui/views/bubble/bubble_border.h
++++ b/ui/views/bubble/bubble_border.h
+@@ -69,7 +69,10 @@ class VIEWS_EXPORT BubbleBorder : public Border {
+   };
+ 
+   enum Shadow {
+-    STANDARD_SHADOW = 0,
++    // NO_SHADOW_LEGACY is obsolete. Used only for Win7 where custom shadows are
++    // not supported.
++    NO_SHADOW_LEGACY = 0,
++    STANDARD_SHADOW,
+ #if BUILDFLAG(IS_CHROMEOS)
+     // CHROMEOS_SYSTEM_UI_SHADOW uses ChromeOS system UI shadow style.
+     CHROMEOS_SYSTEM_UI_SHADOW,
+@@ -307,6 +310,10 @@ class VIEWS_EXPORT BubbleBorder : public Border {
+   // to make the window shape based on insets and GetBorderCornerRadius().
+   void PaintNoShadow(const View& view, gfx::Canvas* canvas);
+ 
++  // Paint for the NO_SHADOW_LEGACY shadow type. This paints a simple line
++  // border.
++  void PaintNoShadowLegacy(const View& view, gfx::Canvas* canvas);
++
+   // Paint a visible arrow pointing to the anchor region.
+   void PaintVisibleArrow(const View& view, gfx::Canvas* canvas);
+ 
+diff --git a/ui/views/bubble/bubble_border_unittest.cc b/ui/views/bubble/bubble_border_unittest.cc
+index 634ae763bf5c2..447d57631b111 100644
+--- a/ui/views/bubble/bubble_border_unittest.cc
++++ b/ui/views/bubble/bubble_border_unittest.cc
+@@ -212,7 +212,8 @@ TEST_F(BubbleBorderTest, IsArrowAtCenter) {
+ }
+ 
+ TEST_F(BubbleBorderTest, GetSizeForContentsSizeTest) {
+-  views::BubbleBorder border(BubbleBorder::NONE, BubbleBorder::NO_SHADOW);
++  views::BubbleBorder border(BubbleBorder::NONE,
++                             BubbleBorder::NO_SHADOW_LEGACY);
+ 
+   const gfx::Insets kInsets = border.GetInsets();
+ 
+diff --git a/ui/views/bubble/bubble_dialog_delegate_view.cc b/ui/views/bubble/bubble_dialog_delegate_view.cc
+index 99a405d2220ed..54c646940ba57 100644
+--- a/ui/views/bubble/bubble_dialog_delegate_view.cc
++++ b/ui/views/bubble/bubble_dialog_delegate_view.cc
+@@ -160,14 +160,24 @@ class BubbleDialogFrameView : public BubbleFrameView {
+   gfx::Size GetMaximumSize() const override { return gfx::Size(); }
+ };
+ 
++bool CustomShadowsSupported() {
++#if BUILDFLAG(IS_WIN)
++  return ui::win::IsAeroGlassEnabled();
++#else
++  return true;
++#endif
++}
++
+ // Create a widget to host the bubble.
+ Widget* CreateBubbleWidget(BubbleDialogDelegate* bubble,
+                            Widget::InitParams::Ownership ownership =
+                                Widget::InitParams::NATIVE_WIDGET_OWNS_WIDGET) {
+   auto bubble_widget = std::make_unique<BubbleWidget>();
+   Widget::InitParams bubble_params(ownership, Widget::InitParams::TYPE_BUBBLE);
+   bubble_params.delegate = bubble;
+-  bubble_params.opacity = Widget::InitParams::WindowOpacity::kTranslucent;
++  bubble_params.opacity = CustomShadowsSupported()
++                              ? Widget::InitParams::WindowOpacity::kTranslucent
++                              : Widget::InitParams::WindowOpacity::kOpaque;
+   bubble_params.accept_events = bubble->accept_events();
+   bubble_params.remove_standard_frame = true;
+   bubble_params.layer_type = bubble->layer_type();
+@@ -174,9 +184,10 @@ Widget* CreateBubbleWidget(BubbleDialogDelegate* bubble) {
+   // Use a window default shadow if the bubble doesn't provides its own.
+   if (bubble->GetShadow() == BubbleBorder::NO_SHADOW) {
+     bubble_params.shadow_type = Widget::InitParams::ShadowType::kDefault;
+-  } else {
++  } else if (CustomShadowsSupported()) {
+     bubble_params.shadow_type = Widget::InitParams::ShadowType::kNone;
+-  }
++  } else
++    bubble_params.shadow_type = Widget::InitParams::ShadowType::kDrop;
+   gfx::NativeView parent = gfx::NativeView();
+   if (bubble->has_parent()) {
+     if (bubble->parent_window()) {
+@@ -563,9 +575,8 @@ BubbleDialogDelegate::CreateNonClientFrameView(Widget* widget) {
+       std::make_unique<BubbleBorder>(arrow(), GetShadow());
+   border->SetColor(background_color());
+ 
+-  if (GetParams().round_corners) {
++  if (CustomShadowsSupported() && GetParams().round_corners)
+     border->set_rounded_corners(gfx::RoundedCornersF(GetCornerRadius()));
+-  }
+ 
+   frame->SetBubbleBorder(std::move(border));
+   return frame;
+@@ -651,10 +662,12 @@ void BubbleDialogDelegate::OnAnchorWidgetBoundsChanged() {
+ }
+ 
+ BubbleBorder::Shadow BubbleDialogDelegate::GetShadow() const {
+   if (!Widget::IsWindowCompositingSupported()) {
+     return BubbleBorder::Shadow::NO_SHADOW;
+   }
+-  return shadow_;
++  if (CustomShadowsSupported() || shadow_ == BubbleBorder::NO_SHADOW)
++    return shadow_;
++  return BubbleBorder::NO_SHADOW_LEGACY;
+ }
+ 
+ View* BubbleDialogDelegate::GetAnchorView() const {
+diff --git a/ui/views/bubble/bubble_dialog_delegate_view_unittest.cc b/ui/views/bubble/bubble_dialog_delegate_view_unittest.cc
+index 0847c71cc56e0..5208ddb304777 100644
+--- a/ui/views/bubble/bubble_dialog_delegate_view_unittest.cc
++++ b/ui/views/bubble/bubble_dialog_delegate_view_unittest.cc
+@@ -43,6 +43,10 @@
+ #include "ui/ozone/public/ozone_platform.h"
+ #endif
+ 
++#if BUILDFLAG(IS_WIN)
++#include "ui/base/win/shell.h"
++#endif
++
+ namespace views {
+ 
+ using test::TestInkDrop;
+@@ -442,13 +446,21 @@ TEST_F(BubbleDialogDelegateViewTest, NonClientHitTest) {
+   BubbleDialogDelegateView::CreateBubble(bubble_delegate);
+   BubbleFrameView* frame = bubble_delegate->GetBubbleFrameView();
+ 
++#if BUILDFLAG(IS_WIN)
++  bool is_aero_glass_enabled = ui::win::IsAeroGlassEnabled();
++#endif
++
+   struct {
+     const int point;
+     const int hit;
+   } kTestCases[] = {
+-      {0, HTTRANSPARENT},
+-      {60, HTCLIENT},
+-      {1000, HTNOWHERE},
++#if BUILDFLAG(IS_WIN)
++    {0, is_aero_glass_enabled ? HTTRANSPARENT : HTNOWHERE},
++#else
++    {0, HTTRANSPARENT},
++#endif
++    {60, HTCLIENT},
++    {1000, HTNOWHERE},
+   };
+ 
+   for (const auto& test_case : kTestCases) {
+diff --git a/ui/views/bubble/bubble_frame_view_unittest.cc b/ui/views/bubble/bubble_frame_view_unittest.cc
+index 54928bd79afe9..35c875d3f642b 100644
+--- a/ui/views/bubble/bubble_frame_view_unittest.cc
++++ b/ui/views/bubble/bubble_frame_view_unittest.cc
+@@ -215,7 +215,7 @@ TEST_F(BubbleFrameViewTest, GetUpdatedWindowBounds) {
+   gfx::Rect window_bounds;
+ 
+   frame()->SetBubbleBorder(
+-      std::make_unique<BubbleBorder>(kArrow, BubbleBorder::NO_SHADOW));
++      std::make_unique<BubbleBorder>(kArrow, BubbleBorder::NO_SHADOW_LEGACY));
+ 
+   // Test that the info bubble displays normally when it fits.
+   frame()->SetArrow(BubbleBorder::TOP_LEFT);
+@@ -377,7 +377,7 @@ TEST_F(BubbleFrameViewTest, TestMirroringForCenteredArrow) {
+ // |adjust_to_fit_available_bounds| is false.
+ TEST_F(BubbleFrameViewTest, GetUpdatedWindowBoundsDontTryMirror) {
+   frame()->SetBubbleBorder(std::make_unique<BubbleBorder>(
+-      BubbleBorder::TOP_RIGHT, BubbleBorder::NO_SHADOW));
++      BubbleBorder::TOP_RIGHT, BubbleBorder::NO_SHADOW_LEGACY));
+   gfx::Rect window_bounds = frame()->GetUpdatedWindowBounds(
+       gfx::Rect(100, 900, 0, 0),       // |anchor_rect|
+       BubbleBorder::Arrow::TOP_RIGHT,  // |delegate_arrow|
+@@ -395,7 +395,7 @@ TEST_F(BubbleFrameViewTest, GetUpdatedWindowBoundsCenterArrows) {
+   gfx::Rect window_bounds;
+ 
+   frame()->SetBubbleBorder(
+-      std::make_unique<BubbleBorder>(kArrow, BubbleBorder::NO_SHADOW));
++      std::make_unique<BubbleBorder>(kArrow, BubbleBorder::NO_SHADOW_LEGACY));
+ 
+   // Some of these tests may go away once --secondary-ui-md becomes the
+   // default. Under Material Design mode, the BubbleBorder doesn't support all
+@@ -459,7 +459,7 @@ TEST_F(BubbleFrameViewTest, GetUpdatedWindowBoundsForBubbleWithAnchorWindow) {
+   gfx::Rect window_bounds;
+ 
+   frame()->SetBubbleBorder(
+-      std::make_unique<BubbleBorder>(kArrow, BubbleBorder::NO_SHADOW));
++      std::make_unique<BubbleBorder>(kArrow, BubbleBorder::NO_SHADOW_LEGACY));
+ 
+   // Test that the bubble displays normally when it fits.
+   frame()->SetArrow(BubbleBorder::TOP_LEFT);
+@@ -577,7 +577,7 @@ TEST_F(BubbleFrameViewTest,
+   gfx::Rect window_bounds;
+ 
+   frame()->SetBubbleBorder(
+-      std::make_unique<BubbleBorder>(kArrow, BubbleBorder::NO_SHADOW));
++      std::make_unique<BubbleBorder>(kArrow, BubbleBorder::NO_SHADOW_LEGACY));
+ 
+   // Test bubble fitting anchor window and not fitting screen on right.
+   //     ________________________
+@@ -685,7 +685,7 @@ TEST_F(BubbleFrameViewTest, MirroringNotStickyForGetUpdatedWindowBounds) {
+   gfx::Rect window_bounds;
+ 
+   frame()->SetBubbleBorder(
+-      std::make_unique<BubbleBorder>(kArrow, BubbleBorder::NO_SHADOW));
++      std::make_unique<BubbleBorder>(kArrow, BubbleBorder::NO_SHADOW_LEGACY));
+ 
+   // Test bubble fitting anchor window and not fitting screen on right.
+   frame()->SetAvailableAnchorWindowBounds(gfx::Rect(700, 200, 400, 400));
+@@ -722,7 +722,7 @@ TEST_F(BubbleFrameViewTest, GetUpdatedWindowBoundsForBubbleSetToOffset) {
+   gfx::Rect window_bounds;
+ 
+   frame()->SetBubbleBorder(
+-      std::make_unique<BubbleBorder>(kArrow, BubbleBorder::NO_SHADOW));
++      std::make_unique<BubbleBorder>(kArrow, BubbleBorder::NO_SHADOW_LEGACY));
+ 
+   // Test that the bubble displays normally when it fits.
+   frame()->SetArrow(BubbleBorder::TOP_LEFT);
+@@ -780,7 +780,7 @@ TEST_F(BubbleFrameViewTest,
+   gfx::Rect window_bounds;
+ 
+   frame()->SetBubbleBorder(
+-      std::make_unique<BubbleBorder>(kArrow, BubbleBorder::NO_SHADOW));
++      std::make_unique<BubbleBorder>(kArrow, BubbleBorder::NO_SHADOW_LEGACY));
+ 
+   // Test that the bubble exiting right side of anchor window displays against
+   // left edge of anchor window bounds if larger than anchor window.
+diff --git a/ui/views/examples/bubble_example.cc b/ui/views/examples/bubble_example.cc
+index 2fd6c571d723e..927f6ed02e8d4 100644
+--- a/ui/views/examples/bubble_example.cc
++++ b/ui/views/examples/bubble_example.cc
+@@ -105,6 +105,11 @@ void BubbleExample::CreateExampleView(View* container) {
+   container->SetLayoutManager(std::make_unique<BoxLayout>(
+       BoxLayout::Orientation::kHorizontal, gfx::Insets(), 10));
+ 
++  no_shadow_legacy_ = container->AddChildView(std::make_unique<LabelButton>(
++      base::BindRepeating(&BubbleExample::ShowBubble, base::Unretained(this),
++                          &no_shadow_legacy_, BubbleBorder::NO_SHADOW_LEGACY,
++                          false),
++      u"No Shadow Legacy"));
+   standard_shadow_ = container->AddChildView(std::make_unique<LabelButton>(
+       base::BindRepeating(&BubbleExample::ShowBubble, base::Unretained(this),
+                           &standard_shadow_, BubbleBorder::STANDARD_SHADOW,
+@@ -116,7 +121,7 @@ void BubbleExample::CreateExampleView(View* container) {
+       u"No Shadow"));
+   persistent_ = container->AddChildView(std::make_unique<LabelButton>(
+       base::BindRepeating(&BubbleExample::ShowBubble, base::Unretained(this),
+-                          &persistent_, BubbleBorder::NO_SHADOW, true),
++                          &persistent_, BubbleBorder::NO_SHADOW_LEGACY, true),
+       u"Persistent"));
+ }
+ 
+diff --git a/ui/views/examples/bubble_example.h b/ui/views/examples/bubble_example.h
+index de0b0c2b68fe1..dc51d893e359b 100644
+--- a/ui/views/examples/bubble_example.h
++++ b/ui/views/examples/bubble_example.h
+@@ -36,6 +36,7 @@ class VIEWS_EXAMPLES_EXPORT BubbleExample : public ExampleBase {
+                   bool persistent,
+                   const ui::Event& event);
+ 
++  raw_ptr<Button> no_shadow_legacy_;
+   raw_ptr<Button> standard_shadow_;
+   raw_ptr<Button> no_shadow_;
+   raw_ptr<Button> persistent_;
+diff --git a/ui/views/widget/desktop_aura/desktop_window_tree_host_win.cc b/ui/views/widget/desktop_aura/desktop_window_tree_host_win.cc
+index d406bd8df1e7a..b053bd0a69d7c 100644
+--- a/ui/views/widget/desktop_aura/desktop_window_tree_host_win.cc
++++ b/ui/views/widget/desktop_aura/desktop_window_tree_host_win.cc
+@@ -26,6 +26,7 @@
+ #include "ui/base/mojom/window_show_state.mojom.h"
+ #include "ui/base/win/event_creation_utils.h"
+ #include "ui/base/win/hwnd_metrics.h"
++#include "ui/base/win/shell.h"
+ #include "ui/base/win/win_cursor.h"
+ #include "ui/color/color_id.h"
+ #include "ui/color/color_provider_key.h"
+@@ -528,7 +528,7 @@ DesktopWindowTreeHostWin::CreateNonClientFrameView() {
+ }
+ 
+ bool DesktopWindowTreeHostWin::ShouldUseNativeFrame() const {
+-  return true;
++  return ui::win::IsAeroGlassEnabled();
+ }
+ 
+ bool DesktopWindowTreeHostWin::ShouldWindowContentsBeTransparent() const {
+diff --git a/ui/views/widget/widget_hwnd_utils.cc b/ui/views/widget/widget_hwnd_utils.cc
+index 3b9b00b7d79ae..47faf7acd453e 100644
+--- a/ui/views/widget/widget_hwnd_utils.cc
++++ b/ui/views/widget/widget_hwnd_utils.cc
+@@ -14,6 +14,10 @@
+ #include "ui/views/widget/widget_delegate.h"
+ #include "ui/views/win/hwnd_message_handler.h"
+ 
++#if BUILDFLAG(IS_WIN)
++#include "ui/base/win/shell.h"
++#endif
++
+ namespace views {
+ 
+ namespace {
+@@ -103,7 +107,12 @@ void CalculateWindowStylesFromInitParams(
+     case Widget::InitParams::TYPE_MENU:
+       styles.style |= WS_POPUP;
+       if (params.remove_standard_frame) {
+-        styles.style |= WS_THICKFRAME;
++        // If the platform doesn't support drop shadow, decorate the Window
++        // with just a border.
++        if (ui::win::IsAeroGlassEnabled())
++          styles.style |= WS_THICKFRAME;
++        else
++          styles.style |= WS_BORDER;
+       }
+       styles.ex_style |= WS_EX_TOOLWINDOW;
+       break;
+@@ -154,9 +163,11 @@ void ConfigureWindowStyles(
+   //    not have not have WM_SIZEBOX, WS_THICKFRAME or WS_CAPTION in its
+   //    style.
+   //
++  // This doesn't work when Aero is disabled, so disable it in that case.
+   // Software composited windows can continue to use WS_EX_LAYERED.
+   bool is_translucent =
+-      (params.opacity == Widget::InitParams::WindowOpacity::kTranslucent);
++      (params.opacity == Widget::InitParams::WindowOpacity::kTranslucent &&
++       (ui::win::IsAeroGlassEnabled() || params.force_software_compositing));
+ 
+   WindowStyles styles = CalculateWindowStylesFromInitParams(
+       params, widget_delegate, native_widget_delegate, is_translucent);
+diff --git a/ui/views/win/fullscreen_handler.cc b/ui/views/win/fullscreen_handler.cc
+index 750a6c4f05926..97d18f20b5589 100644
+--- a/ui/views/win/fullscreen_handler.cc
++++ b/ui/views/win/fullscreen_handler.cc
+@@ -7,6 +7,7 @@
+ #include <memory>
+ 
+ #include "base/win/win_util.h"
++#include "ui/base/win/shell.h"
+ #include "ui/display/types/display_constants.h"
+ #include "ui/display/win/screen_win.h"
+ #include "ui/display/win/screen_win_display.h"
+@@ -61,6 +62,12 @@ void FullscreenHandler::ProcessFullscreen(bool fullscreen,
+                                           int64_t target_display_id) {
+   std::unique_ptr<ScopedFullscreenVisibility> visibility;
+ 
++  // With Aero enabled disabling the visibility causes the window to disappear
++  // for several frames, which looks worse than doing other updates
++  // non-atomically.
++  if (!ui::win::IsAeroGlassEnabled())
++    visibility = std::make_unique<ScopedFullscreenVisibility>(hwnd_);
++
+   // Save current window state if not already fullscreen.
+   if (!fullscreen_) {
+     saved_window_info_.style = GetWindowLong(hwnd_, GWL_STYLE);
+diff --git a/ui/views/win/hwnd_message_handler.cc b/ui/views/win/hwnd_message_handler.cc
+index 1123d33ae5921..c3d9a2c2c0295 100644
+--- a/ui/views/win/hwnd_message_handler.cc
++++ b/ui/views/win/hwnd_message_handler.cc
+@@ -46,6 +46,7 @@
+ #include "ui/base/win/lock_state.h"
+ #include "ui/base/win/mouse_wheel_util.h"
+ #include "ui/base/win/session_change_observer.h"
++#include "ui/base/win/shell.h"
+ #include "ui/base/win/touch_input.h"
+ #include "ui/base/win/win_cursor.h"
+ #include "ui/display/screen.h"
+@@ -348,7 +349,8 @@ class HWNDMessageHandler::ScopedRedrawLock {
+         hwnd_(owner_->hwnd()),
+         should_lock_(owner_->IsVisible() && !owner->HasChildRenderingWindow() &&
+                      ::IsWindow(hwnd_) && !owner_->IsHeadless() &&
+-                     (!(GetWindowLong(hwnd_, GWL_STYLE) & WS_CAPTION))) {
++                     (!(GetWindowLong(hwnd_, GWL_STYLE) & WS_CAPTION) ||
++                      !ui::win::IsAeroGlassEnabled())) {
+     if (should_lock_) {
+       owner_->LockUpdates();
+     }
+@@ -601,7 +603,8 @@ void HWNDMessageHandler::SetParentOrOwner(HWND new_parent) {
+ }
+ 
+ void HWNDMessageHandler::SetDwmFrameExtension(DwmFrameState state) {
+-  if (!delegate_->HasFrame() && !is_translucent_) {
++  if (!delegate_->HasFrame() && ui::win::IsAeroGlassEnabled() &&
++      !is_translucent_) {
+     MARGINS m = {0, 0, 0, 0};
+     if (state == DwmFrameState::kOn && !IsMaximized()) {
+       m = {0, 0, 1, 0};
+@@ -1883,7 +1886,8 @@ void HWNDMessageHandler::OnEnterSizeMove() {
+ 
+ LRESULT HWNDMessageHandler::OnEraseBkgnd(HDC dc) {
+   gfx::Insets insets;
+-  if (delegate_->GetDwmFrameInsetsInPixels(&insets) && !insets.IsEmpty() &&
++  if (ui::win::IsAeroGlassEnabled() &&
++      delegate_->GetDwmFrameInsetsInPixels(&insets) && !insets.IsEmpty() &&
+       needs_dwm_frame_clear_) {
+     // This is necessary to avoid white flashing in the titlebar area around the
+     // minimize/maximize/close buttons.
+@@ -2457,31 +2461,31 @@ void HWNDMessageHandler::OnNCPaint(HRGN rgn) {
+   // It's required to avoid some native painting artifacts from appearing when
+   // the window is resized.
+   if (!delegate_->HasNonClientView() || IsFrameSystemDrawn()) {
+-    // The default WM_NCPAINT handler under Aero Glass doesn't clear the
+-    // nonclient area, so it'll remain the default white color. That area is
+-    // invisible initially (covered by the window border) but can become
+-    // temporarily visible on maximizing or fullscreening, so clear it here.
+-    HDC dc = GetWindowDC(hwnd());
+-    RECT client_rect;
+-    ::GetClientRect(hwnd(), &client_rect);
+-    ::MapWindowPoints(hwnd(), nullptr, reinterpret_cast<POINT*>(&client_rect),
+-                      2);
+-    ::OffsetRect(&client_rect, static_cast<int>(-window_rect.left),
+-                 static_cast<int>(-window_rect.top));
+-    // client_rect now is in window space.
+-
+-    base::win::ScopedGDIObject<HRGN> base(
+-        ::CreateRectRgnIndirect(&dirty_region));
+-    base::win::ScopedGDIObject<HRGN> client(
+-        ::CreateRectRgnIndirect(&client_rect));
+-    base::win::ScopedGDIObject<HRGN> nonclient(::CreateRectRgn(0, 0, 0, 0));
+-    ::CombineRgn(nonclient.get(), base.get(), client.get(), RGN_DIFF);
+-
+-    ::SelectClipRgn(dc, nonclient.get());
+-    HBRUSH brush = CreateSolidBrush(0);
+-    ::FillRect(dc, &dirty_region, brush);
+-    ::DeleteObject(brush);
+-    ::ReleaseDC(hwnd(), dc);
++    if (ui::win::IsAeroGlassEnabled()) {
++      // The default WM_NCPAINT handler under Aero Glass doesn't clear the
++      // nonclient area, so it'll remain the default white color. That area is
++      // invisible initially (covered by the window border) but can become
++      // temporarily visible on maximizing or fullscreening, so clear it here.
++      HDC dc = GetWindowDC(hwnd());
++      RECT client_rect;
++      ::GetClientRect(hwnd(), &client_rect);
++      ::MapWindowPoints(hwnd(), nullptr, reinterpret_cast<POINT*>(&client_rect),
++                        2);
++      ::OffsetRect(&client_rect, static_cast<int>(-window_rect.left),
++                   static_cast<int>(-window_rect.top));
++      // client_rect now is in window space.
++
++      base::win::ScopedGDIObject<HRGN> base(::CreateRectRgnIndirect(&dirty_region));
++      base::win::ScopedGDIObject<HRGN> client(::CreateRectRgnIndirect(&client_rect));
++      base::win::ScopedGDIObject<HRGN> nonclient(::CreateRectRgn(0, 0, 0, 0));
++      ::CombineRgn(nonclient.get(), base.get(), client.get(), RGN_DIFF);
++
++      ::SelectClipRgn(dc, nonclient.get());
++      HBRUSH brush = CreateSolidBrush(0);
++      ::FillRect(dc, &dirty_region, brush);
++      ::DeleteObject(brush);
++      ::ReleaseDC(hwnd(), dc);
++    }
+     SetMsgHandled(FALSE);
+     return;
+   }
+@@ -3535,7 +3541,8 @@ void HWNDMessageHandler::UpdateDwmFrame() {
+   TRACE_EVENT0("ui", "HWNDMessageHandler::UpdateDwmFrame");
+ 
+   gfx::Insets insets;
+-  if (delegate_->GetDwmFrameInsetsInPixels(&insets)) {
++  if (ui::win::IsAeroGlassEnabled() &&
++      delegate_->GetDwmFrameInsetsInPixels(&insets)) {
+     MARGINS margins = {insets.left(), insets.right(), insets.top(),
+                        insets.bottom()};
+     DwmExtendFrameIntoClientArea(hwnd(), &margins);
+diff --git a/ui/views/window/dialog_delegate.cc b/ui/views/window/dialog_delegate.cc
+index 992dbc606ab78..9b7cb9dedf597 100644
+--- a/ui/views/window/dialog_delegate.cc
++++ b/ui/views/window/dialog_delegate.cc
+@@ -31,6 +31,10 @@
+ #include "ui/views/window/dialog_client_view.h"
+ #include "ui/views/window/dialog_observer.h"
+ 
++#if BUILDFLAG(IS_WIN)
++#include "ui/base/win/shell.h"
++#endif
++
+ namespace views {
+ 
+ namespace {
+@@ -84,6 +88,11 @@ bool DialogDelegate::CanSupportCustomFrame(gfx::NativeView parent) {
+   // The new style doesn't support unparented dialogs on Linux desktop.
+   return parent != nullptr;
+ #else
++#if BUILDFLAG(IS_WIN)
++  // The new style doesn't support unparented dialogs on Windows Classic themes.
++  if (!ui::win::IsAeroGlassEnabled())
++    return parent != nullptr;
++#endif
+   return true;
+ #endif
+ }
