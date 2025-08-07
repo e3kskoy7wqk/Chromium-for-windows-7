@@ -1,0 +1,285 @@
+
+
+diff --git a/content/child/dwrite_font_proxy/dwrite_font_proxy_init_impl_win.cc b/content/child/dwrite_font_proxy/dwrite_font_proxy_init_impl_win.cc
+index ed3037dffebcf..5f074f2e283cc 100644
+--- a/content/child/dwrite_font_proxy/dwrite_font_proxy_init_impl_win.cc
++++ b/content/child/dwrite_font_proxy/dwrite_font_proxy_init_impl_win.cc
+@@ -39,11 +39,31 @@ base::RepeatingCallback<mojo::PendingRemote<blink::mojom::DWriteFontProxy>(
+ // Windows-only DirectWrite support. These warm up the DirectWrite paths
+ // before sandbox lock down to allow Skia access to the Font Manager service.
+ void CreateDirectWriteFactory(IDWriteFactory** factory) {
++  typedef decltype(DWriteCreateFactory)* DWriteCreateFactoryProc;
++  HMODULE dwrite_dll = LoadLibraryW(L"dwrite.dll");
++  // TODO(scottmg): Temporary code to track crash in http://crbug.com/387867.
++  if (!dwrite_dll) {
++    DWORD load_library_get_last_error = GetLastError();
++    base::debug::Alias(&dwrite_dll);
++    base::debug::Alias(&load_library_get_last_error);
++    CHECK(false);
++  }
++
+   // This shouldn't be necessary, but not having this causes breakage in
+   // content_browsertests, and possibly other high-stress cases.
+   PatchServiceManagerCalls();
+ 
+-  CHECK(SUCCEEDED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_ISOLATED,
++  DWriteCreateFactoryProc dwrite_create_factory_proc =
++      reinterpret_cast<DWriteCreateFactoryProc>(
++          GetProcAddress(dwrite_dll, "DWriteCreateFactory"));
++  // TODO(scottmg): Temporary code to track crash in http://crbug.com/387867.
++  if (!dwrite_create_factory_proc) {
++    DWORD get_proc_address_get_last_error = GetLastError();
++    base::debug::Alias(&dwrite_create_factory_proc);
++    base::debug::Alias(&get_proc_address_get_last_error);
++    CHECK(false);
++  }
++  CHECK(SUCCEEDED(dwrite_create_factory_proc(DWRITE_FACTORY_TYPE_ISOLATED,
+                                       __uuidof(IDWriteFactory),
+                                       reinterpret_cast<IUnknown**>(factory))));
+ }
+@@ -51,6 +71,18 @@ void CreateDirectWriteFactory(IDWriteFactory** factory) {
+ }  // namespace
+ 
+ void InitializeDWriteFontProxy() {
++  using DWriteCreateFactoryProc = decltype(DWriteCreateFactory)*;
++  HMODULE dwrite_dll = LoadLibraryW(L"dwrite.dll");
++  if (!dwrite_dll)
++    return;
++
++  DWriteCreateFactoryProc dwrite_create_factory_proc =
++      reinterpret_cast<DWriteCreateFactoryProc>(
++          GetProcAddress(dwrite_dll, "DWriteCreateFactory"));
++  // Not finding the DWriteCreateFactory function indicates a corrupt dll.
++  if (!dwrite_create_factory_proc)
++    return;
++
+   TRACE_EVENT0("dwrite,fonts", "InitializeDWriteFontProxy");
+   mswr::ComPtr<IDWriteFactory> factory;
+ 
+diff --git a/content/child/dwrite_font_proxy/dwrite_font_proxy_win_unittest.cc b/content/child/dwrite_font_proxy/dwrite_font_proxy_win_unittest.cc
+index 163d1ecca00c1..58b71a05c06f2 100644
+--- a/content/child/dwrite_font_proxy/dwrite_font_proxy_win_unittest.cc
++++ b/content/child/dwrite_font_proxy/dwrite_font_proxy_win_unittest.cc
+@@ -22,9 +22,27 @@ namespace content {
+ 
+ namespace {
+ 
++void CreateDWriteFactory(IUnknown** factory) {
++  using DWriteCreateFactoryProc = decltype(DWriteCreateFactory)*;
++  HMODULE dwrite_dll = LoadLibraryW(L"dwrite.dll");
++  if (!dwrite_dll)
++    return;
++
++  DWriteCreateFactoryProc dwrite_create_factory_proc =
++      reinterpret_cast<DWriteCreateFactoryProc>(
++          GetProcAddress(dwrite_dll, "DWriteCreateFactory"));
++  if (!dwrite_create_factory_proc)
++    return;
++
++  dwrite_create_factory_proc(DWRITE_FACTORY_TYPE_SHARED,
++                             __uuidof(IDWriteFactory), factory);
++}
++
+ class DWriteFontProxyUnitTest : public testing::Test {
+  public:
+   DWriteFontProxyUnitTest() {
++    if (!factory)
++      return;
+     fake_collection_ = std::make_unique<FakeFontCollection>();
+     SetupFonts(fake_collection_.get());
+     DWriteFontCollectionProxy::Create(&collection_, factory.Get(),
+@@ -52,8 +70,7 @@ class DWriteFontProxyUnitTest : public testing::Test {
+   }
+ 
+   static void SetUpTestCase() {
+-    DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
+-                        &factory);
++    CreateDWriteFactory(&factory);
+ 
+     std::vector<wchar_t> font_path;
+     font_path.resize(MAX_PATH);
+@@ -79,6 +96,9 @@ std::vector<std::wstring> DWriteFontProxyUnitTest::arial_font_files;
+ mswr::ComPtr<IDWriteFactory> DWriteFontProxyUnitTest::factory;
+ 
+ TEST_F(DWriteFontProxyUnitTest, GetFontFamilyCount) {
++  if (!factory)
++    return;
++
+   UINT32 family_count = collection_->GetFontFamilyCount();
+ 
+   EXPECT_EQ(3u, family_count);
+@@ -94,6 +114,8 @@ TEST_F(DWriteFontProxyUnitTest, GetFontFamilyCount) {
+ 
+ TEST_F(DWriteFontProxyUnitTest, FindFamilyNameShouldFindFamily) {
+   HRESULT hr;
++  if (!factory)
++    return;
+ 
+   UINT32 index = UINT_MAX;
+   BOOL exists = FALSE;
+@@ -111,6 +133,8 @@ TEST_F(DWriteFontProxyUnitTest, FindFamilyNameShouldFindFamily) {
+ 
+ TEST_F(DWriteFontProxyUnitTest, FindFamilyNameShouldReturnUINTMAXWhenNotFound) {
+   HRESULT hr;
++  if (!factory)
++    return;
+ 
+   UINT32 index = UINT_MAX;
+   BOOL exists = FALSE;
+@@ -126,6 +150,8 @@ TEST_F(DWriteFontProxyUnitTest, FindFamilyNameShouldReturnUINTMAXWhenNotFound) {
+ 
+ TEST_F(DWriteFontProxyUnitTest, FindFamilyNameShouldNotSendDuplicateIPC) {
+   HRESULT hr;
++  if (!factory)
++    return;
+ 
+   UINT32 index = UINT_MAX;
+   BOOL exists = FALSE;
+@@ -141,6 +167,8 @@ TEST_F(DWriteFontProxyUnitTest, FindFamilyNameShouldNotSendDuplicateIPC) {
+ 
+ TEST_F(DWriteFontProxyUnitTest, GetFontFamilyShouldCreateFamily) {
+   HRESULT hr;
++  if (!factory)
++    return;
+ 
+   UINT32 index = UINT_MAX;
+   BOOL exists = FALSE;
+@@ -156,6 +184,9 @@ TEST_F(DWriteFontProxyUnitTest, GetFontFamilyShouldCreateFamily) {
+ }
+ 
+ TEST_F(DWriteFontProxyUnitTest, PrewarmFamilyShouldCreateFamily) {
++  if (!factory)
++    return;
++
+   collection_->InitializePrewarmerForTesting(fake_collection_->CreateRemote());
+ 
+   collection_->PrewarmFamily("Arial");
+@@ -204,6 +235,8 @@ void CheckLocale(const std::wstring& locale_name,
+ 
+ TEST_F(DWriteFontProxyUnitTest, GetFamilyNames) {
+   HRESULT hr;
++  if (!factory)
++    return;
+ 
+   UINT32 index = UINT_MAX;
+   BOOL exists = FALSE;
+@@ -241,6 +274,8 @@ TEST_F(DWriteFontProxyUnitTest, GetFamilyNames) {
+ 
+ TEST_F(DWriteFontProxyUnitTest, GetFontCollection) {
+   HRESULT hr;
++  if (!factory)
++    return;
+ 
+   UINT32 index = UINT_MAX;
+   BOOL exists = FALSE;
+@@ -261,6 +296,8 @@ TEST_F(DWriteFontProxyUnitTest, GetFontCollection) {
+ 
+ TEST_F(DWriteFontProxyUnitTest, GetFamilyNamesShouldNotIPCAfterLoadingFamily) {
+   HRESULT hr;
++  if (!factory)
++    return;
+ 
+   UINT32 index = UINT_MAX;
+   BOOL exists = FALSE;
+@@ -279,6 +316,8 @@ TEST_F(DWriteFontProxyUnitTest, GetFamilyNamesShouldNotIPCAfterLoadingFamily) {
+ TEST_F(DWriteFontProxyUnitTest,
+        GetFontFamilyShouldNotCreateFamilyWhenIndexIsInvalid) {
+   HRESULT hr;
++  if (!factory)
++    return;
+ 
+   UINT32 index = UINT_MAX;
+   BOOL exists = FALSE;
+@@ -294,6 +333,8 @@ TEST_F(DWriteFontProxyUnitTest,
+ 
+ TEST_F(DWriteFontProxyUnitTest, LoadingFontFamily) {
+   HRESULT hr;
++  if (!factory)
++    return;
+ 
+   UINT32 index = UINT_MAX;
+   BOOL exists = FALSE;
+@@ -328,6 +369,8 @@ TEST_F(DWriteFontProxyUnitTest, LoadingFontFamily) {
+ 
+ TEST_F(DWriteFontProxyUnitTest, GetFontFromFontFaceShouldFindFont) {
+   HRESULT hr;
++  if (!factory)
++    return;
+ 
+   UINT32 index = UINT_MAX;
+   BOOL exists = FALSE;
+@@ -352,6 +395,9 @@ TEST_F(DWriteFontProxyUnitTest, GetFontFromFontFaceShouldFindFont) {
+ }
+ 
+ TEST_F(DWriteFontProxyUnitTest, TestCustomFontFiles) {
++  if (!factory)
++    return;
++
+   FakeFontCollection fonts;
+   FakeFont& arial = fonts.AddFont(u"Arial").AddFamilyName(u"en-us", u"Arial");
+   for (auto& path : arial_font_files) {
+diff --git a/content/child/dwrite_font_proxy/font_fallback_win_unittest.cc b/content/child/dwrite_font_proxy/font_fallback_win_unittest.cc
+index 90a04f1deef7f..fb7cc559a66ca 100644
+--- a/content/child/dwrite_font_proxy/font_fallback_win_unittest.cc
++++ b/content/child/dwrite_font_proxy/font_fallback_win_unittest.cc
+@@ -27,8 +27,7 @@ namespace {
+ class FontFallbackUnitTest : public testing::Test {
+  public:
+   FontFallbackUnitTest() {
+-    DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
+-                        &factory_);
++    CreateDWriteFactory(&factory_);
+ 
+     factory_->CreateNumberSubstitution(DWRITE_NUMBER_SUBSTITUTION_METHOD_NONE,
+                                        L"en-us", true /* ignoreUserOverride */,
+@@ -50,6 +49,22 @@ class FontFallbackUnitTest : public testing::Test {
+                                       fake_collection_->CreateRemote());
+   }
+ 
++  void CreateDWriteFactory(IUnknown** factory) {
++    using DWriteCreateFactoryProc = decltype(DWriteCreateFactory)*;
++    HMODULE dwrite_dll = LoadLibraryW(L"dwrite.dll");
++    if (!dwrite_dll)
++      return;
++
++    DWriteCreateFactoryProc dwrite_create_factory_proc =
++        reinterpret_cast<DWriteCreateFactoryProc>(
++            GetProcAddress(dwrite_dll, "DWriteCreateFactory"));
++    if (!dwrite_create_factory_proc)
++      return;
++
++    dwrite_create_factory_proc(DWRITE_FACTORY_TYPE_SHARED,
++                               __uuidof(IDWriteFactory), factory);
++  }
++
+   base::test::TaskEnvironment task_environment;
+   std::unique_ptr<FakeFontCollection> fake_collection_;
+   mswr::ComPtr<IDWriteFactory> factory_;
+diff --git a/ui/gfx/win/direct_write.cc b/ui/gfx/win/direct_write.cc
+index 67e21ad0880cb..74f2348e681c9 100644
+--- a/ui/gfx/win/direct_write.cc
++++ b/ui/gfx/win/direct_write.cc
+@@ -38,9 +38,22 @@ void SetDirectWriteFactory(IDWriteFactory* factory) {
+ }  // anonymous namespace
+ 
+ void CreateDWriteFactory(IDWriteFactory** factory) {
++  using DWriteCreateFactoryProc = decltype(DWriteCreateFactory)*;
++  HMODULE dwrite_dll = LoadLibraryW(L"dwrite.dll");
++  if (!dwrite_dll)
++    return;
++
++  DWriteCreateFactoryProc dwrite_create_factory_proc =
++      reinterpret_cast<DWriteCreateFactoryProc>(
++          GetProcAddress(dwrite_dll, "DWriteCreateFactory"));
++  // Not finding the DWriteCreateFactory function indicates a corrupt dll.
++  if (!dwrite_create_factory_proc)
++    return;
++
++  // Failure to create the DirectWrite factory indicates a corrupt dll.
+   Microsoft::WRL::ComPtr<IUnknown> factory_unknown;
+   HRESULT hr =
+-      DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
++      dwrite_create_factory_proc(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
+                           &factory_unknown);
+   if (FAILED(hr)) {
+     base::debug::Alias(&hr);

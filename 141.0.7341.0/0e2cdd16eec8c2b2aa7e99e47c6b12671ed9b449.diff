@@ -1,0 +1,36 @@
+diff --git a/chrome/browser/win/parental_controls.cc b/chrome/browser/win/parental_controls.cc
+index 3ec0d8c92bd0a..1496bf8047422 100644
+--- a/chrome/browser/win/parental_controls.cc
++++ b/chrome/browser/win/parental_controls.cc
+@@ -24,6 +24,7 @@
+ #include "base/win/registry.h"
+ #include "base/win/win_util.h"
+ #include "base/win/windows_types.h"
++#include "base/win/windows_version.h"
+ 
+ namespace {
+ 
+@@ -136,7 +137,8 @@ class WinParentalControlsValue {
+ 
+     // Parental controls APIs are not fully supported in Win10 and beyond, so
+     // check registry properties for restictions.
+-    UpdateParentalControlsFromRegistry(&controls);
++    if (base::win::GetVersion() >= base::win::Version::WIN10)
++      UpdateParentalControlsFromRegistry(&controls);
+ 
+     return controls;
+   }
+diff --git a/chrome/browser/win/titlebar_config.cc b/chrome/browser/win/titlebar_config.cc
+index edefb9090e369..d9c5f6503dba3 100644
+--- a/chrome/browser/win/titlebar_config.cc
++++ b/chrome/browser/win/titlebar_config.cc
+@@ -31,7 +31,8 @@ bool ShouldAlwaysUseSystemTitlebar() {
+       base::CommandLine::ForCurrentProcess()->HasSwitch(
+           switches::kDisableWindows10CustomTitlebar);
+ 
+-  return custom_titlebar_disabled;
++  return custom_titlebar_disabled ||
++         base::win::GetVersion() < base::win::Version::WIN10;
+ }
+ 
+ bool ShouldBrowserUseMicaTitlebar(BrowserView* browser_view) {
