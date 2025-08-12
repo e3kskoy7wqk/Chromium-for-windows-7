@@ -1,0 +1,13 @@
+
+
+diff --git a/ui/native_theme/caption_style_win.cc b/ui/native_theme/caption_style_win.cc
+index 8d6499fc72a8d..6a943d724ef99 100644
+--- a/ui/native_theme/caption_style_win.cc
++++ b/ui/native_theme/caption_style_win.cc
+@@ -173,5 +173,6 @@ std::string GetCssColorWithAlpha(CC::ClosedCaptionColor caption_color,
+ 
+ std::optional<CaptionStyle> InitializeFromSystemSettings() {
+   TRACE_EVENT0("ui", "InitializeFromSystemSettings");
++  DCHECK_GE(base::win::GetVersion(), base::win::Version::WIN10);
+ 
+   // Need to do this check before using ScopedHString.
