@@ -1,0 +1,1 @@
+[video_capture] Add an a devices changed API to VideoSourceProvider    2023/7/14 0:20:00    57f64af0d10734b803d31833882fb864e3e34a51
