@@ -1,0 +1,5 @@
+Yet more Windows color-related cleanup.    2025/8/29 23:40:45    d6b4d93dbddad48eb816800de27822e4c672bff9
+Fix bug where ColorPrevalence was not sufficiently respected.    2025/8/29 23:40:33    8f957081b3e3e50d5d84271a736ff46b2a655185
+native_chrome_color_mixer_win.cc cleanup part 3.    2025/8/29 1:10:07    a1abe38c0646dd8f369fb57a5b7d6270ee88b290
+Remove FrameColorHelper, part 2: Remove class    2025/8/28 8:12:22    d24181f31da084981ff3b7d379b6f342ee865f40
+Remove FrameColorHelper, part 1: Remove member variables    2025/8/27 9:41:19    48675b6e69fe6369c7c98b9b862e0b2d95ed4c2f

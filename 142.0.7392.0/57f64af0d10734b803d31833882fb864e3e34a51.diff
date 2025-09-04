@@ -1,0 +1,17 @@
+diff --git a/services/video_capture/devices_changed_notifier.cc b/services/video_capture/devices_changed_notifier.cc
+index 5b76b235e432b..7f8cb2c1cf9b2 100644
+--- a/services/video_capture/devices_changed_notifier.cc
++++ b/services/video_capture/devices_changed_notifier.cc
+@@ -40,10 +40,12 @@ void DevicesChangedNotifier::OnDevicesChanged(
+ }
+ 
+ void DevicesChangedNotifier::UpdateObservers() {
++#if 0
+   DCHECK(task_runner_->RunsTasksInCurrentSequence());
+   for (const auto& observer : observers_) {
+     observer->OnDevicesChanged();
+   }
++#endif //if 0
+ }
+ 
+ }  // namespace video_capture

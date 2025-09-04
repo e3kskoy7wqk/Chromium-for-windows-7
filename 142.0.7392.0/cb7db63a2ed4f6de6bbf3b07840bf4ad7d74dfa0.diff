@@ -1,0 +1,29 @@
+diff --git a/third_party/blink/common/features.cc b/third_party/blink/common/features.cc
+index 380c47f4a0f18..ef7398c82e992 100644
+--- a/third_party/blink/common/features.cc
++++ b/third_party/blink/common/features.cc
+@@ -2252,6 +2252,11 @@ BASE_FEATURE_PARAM(bool,
+ // Flag guard for removing usage of the CommitNavigationParams.redirects
+ // array of URLs in the renderer process.
+ BASE_FEATURE(RemoveCommitRedirectUrlsArray, base::FEATURE_ENABLED_BY_DEFAULT);
++BASE_FEATURE_PARAM(bool,
++                   kLegacyWindowsPlatform,
++                   &kReduceUserAgentPlatformOsCpu,
++                   "legacy_windows_platform",
++                   true);
+ 
+ // Disables sending the Purpose: "prefetch" header for prefetches and
+ // prerenders.
+diff --git a/third_party/blink/public/common/features.h b/third_party/blink/public/common/features.h
+index ccb80f279f5d3..7efed8bf262e0 100644
+--- a/third_party/blink/public/common/features.h
++++ b/third_party/blink/public/common/features.h
+@@ -1445,6 +1445,8 @@ BLINK_COMMON_EXPORT BASE_DECLARE_FEATURE_PARAM(std::string,
+ // Parameters for kReduceUserAgentPlatformOsCpu;
+ BLINK_COMMON_EXPORT BASE_DECLARE_FEATURE_PARAM(bool,
+                                                kAllExceptLegacyWindowsPlatform);
++BLINK_COMMON_EXPORT BASE_DECLARE_FEATURE_PARAM(bool,
++                                               kLegacyWindowsPlatform);
+ 
+ BLINK_COMMON_EXPORT BASE_DECLARE_FEATURE(kReducedReferrerGranularity);
+ 

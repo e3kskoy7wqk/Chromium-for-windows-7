@@ -1,0 +1,45 @@
+diff --git a/components/embedder_support/user_agent_utils.cc b/components/embedder_support/user_agent_utils.cc
+index 133db932c9f60..384a829d6a4f5 100644
+--- a/components/embedder_support/user_agent_utils.cc
++++ b/components/embedder_support/user_agent_utils.cc
+@@ -175,7 +175,8 @@ bool ShouldSendUserAgentUnifiedPlatform(
+ #else
+   return ShouldReduceUserAgentMinorVersion(user_agent_reduction) &&
+          base::FeatureList::IsEnabled(
+-             blink::features::kReduceUserAgentPlatformOsCpu);
++             blink::features::kReduceUserAgentPlatformOsCpu) &&
++         blink::features::kAllExceptLegacyWindowsPlatform.Get();
+ #endif
+ }
+ 
+diff --git a/third_party/blink/common/features.cc b/third_party/blink/common/features.cc
+index 12247f1df474a..6a0c633986484 100644
+--- a/third_party/blink/common/features.cc
++++ b/third_party/blink/common/features.cc
+@@ -2188,6 +2188,12 @@ BASE_FEATURE_PARAM(std::string,
+                    "build_version",
+                    "0");
+ 
++BASE_FEATURE_PARAM(bool,
++                   kAllExceptLegacyWindowsPlatform,
++                   &kReduceUserAgentPlatformOsCpu,
++                   "all_except_legacy_windows_platform",
++                   true);
++
+ // Whether `blink::MemoryCache` and `blink::ResourceFetcher` release their
+ // strong references to resources on memory pressure.
+ BASE_FEATURE(ReleaseResourceStrongReferencesOnMemoryPressure,
+diff --git a/third_party/blink/public/common/features.h b/third_party/blink/public/common/features.h
+index 40a5a4db730bc..d3535c8e1f76b 100644
+--- a/third_party/blink/public/common/features.h
++++ b/third_party/blink/public/common/features.h
+@@ -1431,6 +1431,9 @@ BLINK_COMMON_EXPORT BASE_DECLARE_FEATURE_PARAM(std::string,
+                                                kUserAgentFrozenBuildVersion);
+ 
+ // Parameters for kReduceUserAgentPlatformOsCpu;
++BLINK_COMMON_EXPORT BASE_DECLARE_FEATURE_PARAM(bool,
++                                               kAllExceptLegacyWindowsPlatform);
++
+ BLINK_COMMON_EXPORT BASE_DECLARE_FEATURE(kReducedReferrerGranularity);
+ 
+ BLINK_COMMON_EXPORT BASE_DECLARE_FEATURE(

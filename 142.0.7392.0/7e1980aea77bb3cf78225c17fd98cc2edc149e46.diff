@@ -1,0 +1,317 @@
+diff --git a/chrome/app/chromium_strings.grd b/chrome/app/chromium_strings.grd
+index 36e1bd78236ae..3c07d8e5d3a89 100644
+--- a/chrome/app/chromium_strings.grd
++++ b/chrome/app/chromium_strings.grd
+@@ -2780,20 +2780,6 @@ Chromium is unable to recover your settings.
+       <message name="IDS_DICE_MIGRATION_CONFIRMATION_TOAST_BUTTON" desc="The text on the button of the confirmation toast shown after the user clicks the accept button on the Dice Migration dialog, that allows the users to control the sync settings or sign out of Chrome.">
+         Manage
+       </message>
+-
+-      <!-- Profile menu strings -->
+-      <if expr="not is_android">
+-        <if expr="use_titlecase">
+-          <message name="IDS_PROFILE_MENU_ACCOUNT_SETTINGS_BUTTON" desc="Button in the avatar menu bubble view for opening Chrome account settings.">
+-            Your Account in Chromium
+-          </message>
+-        </if>
+-        <if expr="not use_titlecase">
+-          <message name="IDS_PROFILE_MENU_ACCOUNT_SETTINGS_BUTTON" desc="Button in the avatar menu bubble view for opening Chrome account settings.">
+-            Your account in Chromium
+-          </message>
+-        </if>
+-      </if>
+     </messages>
+   </release>
+ </grit>
+diff --git a/chrome/app/chromium_strings_grd/IDS_PROFILE_MENU_ACCOUNT_SETTINGS_BUTTON.png.sha1 b/chrome/app/chromium_strings_grd/IDS_PROFILE_MENU_ACCOUNT_SETTINGS_BUTTON.png.sha1
+deleted file mode 100644
+index 33b2671894c73..0000000000000
+--- a/chrome/app/chromium_strings_grd/IDS_PROFILE_MENU_ACCOUNT_SETTINGS_BUTTON.png.sha1
++++ /dev/null
+@@ -1 +0,0 @@
+-cd9188dada6f83b8a4fb8da24f93c07ffeca160f
+\ No newline at end of file
+diff --git a/chrome/app/google_chrome_strings.grd b/chrome/app/google_chrome_strings.grd
+index 5c83e5da6ed05..b39d8cd0b4892 100644
+--- a/chrome/app/google_chrome_strings.grd
++++ b/chrome/app/google_chrome_strings.grd
+@@ -2801,20 +2801,6 @@ Google Chrome is unable to recover your settings.
+       <message name="IDS_DICE_MIGRATION_CONFIRMATION_TOAST_BUTTON" desc="The text on the button of the confirmation toast shown after the user clicks on the accept button on the Dice Migration dialog, that allows the users to control the sync settings or sign out of Chrome.">
+         Manage
+       </message>
+-
+-      <!-- Profile menu strings -->
+-      <if expr="not is_android">
+-        <if expr="use_titlecase">
+-          <message name="IDS_PROFILE_MENU_ACCOUNT_SETTINGS_BUTTON" desc="Button in the avatar menu bubble view for opening Chrome account settings.">
+-            Your Account in Chrome
+-          </message>
+-        </if>
+-        <if expr="not use_titlecase">
+-          <message name="IDS_PROFILE_MENU_ACCOUNT_SETTINGS_BUTTON" desc="Button in the avatar menu bubble view for opening Chrome account settings.">
+-            Your account in Chrome
+-          </message>
+-        </if>
+-      </if>
+     </messages>
+   </release>
+ </grit>
+diff --git a/chrome/app/google_chrome_strings_grd/IDS_PROFILE_MENU_ACCOUNT_SETTINGS_BUTTON.png.sha1 b/chrome/app/google_chrome_strings_grd/IDS_PROFILE_MENU_ACCOUNT_SETTINGS_BUTTON.png.sha1
+deleted file mode 100644
+index 33b2671894c73..0000000000000
+--- a/chrome/app/google_chrome_strings_grd/IDS_PROFILE_MENU_ACCOUNT_SETTINGS_BUTTON.png.sha1
++++ /dev/null
+@@ -1 +0,0 @@
+-cd9188dada6f83b8a4fb8da24f93c07ffeca160f
+\ No newline at end of file
+diff --git a/chrome/browser/ui/views/profiles/profile_menu_view.cc b/chrome/browser/ui/views/profiles/profile_menu_view.cc
+index af4d60c78c171..e7b74b80b42bb 100644
+--- a/chrome/browser/ui/views/profiles/profile_menu_view.cc
++++ b/chrome/browser/ui/views/profiles/profile_menu_view.cc
+@@ -331,14 +331,6 @@ void ProfileMenuView::OnSyncSettingsButtonClicked() {
+   chrome::ShowSettingsSubPage(&browser(), chrome::kSyncSetupSubPage);
+ }
+ 
+-void ProfileMenuView::OnAccountSettingsButtonClicked() {
+-  OnActionableItemClicked(ActionableItem::kAccountSettingsButton);
+-  if (!perform_menu_actions()) {
+-    return;
+-  }
+-  chrome::ShowSettingsSubPage(&browser(), chrome::kPeopleSubPage);
+-}
+-
+ void ProfileMenuView::OnSyncErrorButtonClicked(AvatarSyncErrorType error) {
+   OnActionableItemClicked(ActionableItem::kSyncErrorButton);
+   if (!perform_menu_actions()) {
+@@ -854,35 +846,6 @@ void ProfileMenuView::MaybeBuildChromeAccountSettingsButton() {
+     return;
+   }
+ 
+-  // Show the settings button only when signed in to Chrome or pending sign in.
+-  switch (signin_util::GetSignedInState(identity_manager)) {
+-    case signin_util::SignedInState::kSignInPending:
+-    case signin_util::SignedInState::kSignedIn:
+-      break;
+-    case signin_util::SignedInState::kSyncPaused:
+-    case signin_util::SignedInState::kSignedOut:
+-    case signin_util::SignedInState::kWebOnlySignedIn:
+-    case signin_util::SignedInState::kSyncing:
+-      return;
+-  }
+-
+-  AddFeatureButton(
+-      l10n_util::GetStringUTF16(IDS_PROFILE_MENU_ACCOUNT_SETTINGS_BUTTON),
+-      base::BindRepeating(&ProfileMenuView::OnAccountSettingsButtonClicked,
+-                          base::Unretained(this)),
+-      vector_icons::kSettingsChromeRefreshIcon);
+-}
+-
+-void ProfileMenuView::MaybeBuildChromeAccountSettingsButtonWithSync() {
+-  CHECK(!profile().IsGuestSession());
+-
+-  signin::IdentityManager* identity_manager =
+-      IdentityManagerFactory::GetForProfile(&profile());
+-
+-  if (!identity_manager) {
+-    return;
+-  }
+-
+   // Show the settings button when signed in to Chrome or to the web, or if
+   // signin is disallowed.
+   const bool should_show_settings_button =
+@@ -1026,9 +989,7 @@ void ProfileMenuView::BuildFeatureButtons() {
+   BuildAutofillSettingsButton();
+   MaybeBuildManageGoogleAccountButton();
+   BuildCustomizeProfileButton();
+-  base::FeatureList::IsEnabled(syncer::kReplaceSyncPromosWithSignInPromos)
+-      ? MaybeBuildChromeAccountSettingsButton()
+-      : MaybeBuildChromeAccountSettingsButtonWithSync();
++  MaybeBuildChromeAccountSettingsButton();
+   MaybeBuildCloseBrowsersButton();
+   MaybeBuildSignoutButton();
+ }
+diff --git a/chrome/browser/ui/views/profiles/profile_menu_view.h b/chrome/browser/ui/views/profiles/profile_menu_view.h
+index b78d6df36473b..5e6c8b99c4f87 100644
+--- a/chrome/browser/ui/views/profiles/profile_menu_view.h
++++ b/chrome/browser/ui/views/profiles/profile_menu_view.h
+@@ -82,7 +82,6 @@ class ProfileMenuView : public ProfileMenuViewBase {
+   void OnGuestProfileButtonClicked();
+   void OnExitProfileButtonClicked();
+   void OnSyncSettingsButtonClicked();
+-  void OnAccountSettingsButtonClicked();
+   void OnSyncErrorButtonClicked(AvatarSyncErrorType error);
+   void OnSigninButtonClicked(CoreAccountInfo account,
+                              ActionableItem button_type,
+@@ -106,7 +105,6 @@ class ProfileMenuView : public ProfileMenuViewBase {
+   void MaybeBuildBatchUploadButton();
+   void BuildAutofillSettingsButton();
+   void BuildCustomizeProfileButton();
+-  void MaybeBuildChromeAccountSettingsButtonWithSync();
+   void MaybeBuildChromeAccountSettingsButton();
+   void MaybeBuildManageGoogleAccountButton();
+   void MaybeBuildCloseBrowsersButton();
+diff --git a/chrome/browser/ui/views/profiles/profile_menu_view_base.h b/chrome/browser/ui/views/profiles/profile_menu_view_base.h
+index 896785a33c6e5..d2c881fa78c1a 100644
+--- a/chrome/browser/ui/views/profiles/profile_menu_view_base.h
++++ b/chrome/browser/ui/views/profiles/profile_menu_view_base.h
+@@ -81,8 +81,7 @@ class ProfileMenuViewBase : public content::WebContentsDelegate,
+     kAutofillSettingsButton = 22,
+     // DEPRECATED: kHistorySyncOptInButton = 23,
+     kBatchUploadButton = 24,
+-    kAccountSettingsButton = 25,
+-    kMaxValue = kAccountSettingsButton,
++    kMaxValue = kBatchUploadButton,
+   };
+   // LINT.ThenChange(//tools/metrics/histograms/metadata/profile/enums.xml:ProfileMenuActionableItem)
+ 
+diff --git a/chrome/browser/ui/views/profiles/profile_menu_view_browsertest.cc b/chrome/browser/ui/views/profiles/profile_menu_view_browsertest.cc
+index e374efa52ae9a..511f34408c169 100644
+--- a/chrome/browser/ui/views/profiles/profile_menu_view_browsertest.cc
++++ b/chrome/browser/ui/views/profiles/profile_menu_view_browsertest.cc
+@@ -1397,7 +1397,7 @@ constexpr std::array kActionableItems_WithPromoButton = {
+     ProfileMenuViewBase::ActionableItem::kAutofillSettingsButton,
+     ProfileMenuViewBase::ActionableItem::kManageGoogleAccountButton,
+     ProfileMenuViewBase::ActionableItem::kEditProfileButton,
+-    ProfileMenuViewBase::ActionableItem::kAccountSettingsButton,
++    ProfileMenuViewBase::ActionableItem::kSyncSettingsButton,
+     ProfileMenuViewBase::ActionableItem::kSignoutButton,
+     ProfileMenuViewBase::ActionableItem::kAddNewProfileButton,
+     ProfileMenuViewBase::ActionableItem::kGuestProfileButton,
+diff --git a/chrome/browser/ui/views/profiles/profile_menu_view_ui_browsertest.cc b/chrome/browser/ui/views/profiles/profile_menu_view_ui_browsertest.cc
+index 79f53d3f231e2..0bdd3e7baf7c2 100644
+--- a/chrome/browser/ui/views/profiles/profile_menu_view_ui_browsertest.cc
++++ b/chrome/browser/ui/views/profiles/profile_menu_view_ui_browsertest.cc
+@@ -87,9 +87,6 @@ struct ProfileMenuViewPixelTestParam {
+   // Features and parameters that are enabled in addition to the features
+   // enabled by default.
+   std::vector<base::test::FeatureRefAndParams> extra_features_and_params;
+-  // Features that are disabled in addition to the features disabled by
+-  // default.
+-  base::flat_set<base::test::FeatureRef> disabled_features;
+ };
+ 
+ // To be passed as 4th argument to `INSTANTIATE_TEST_SUITE_P()`, allows the test
+@@ -156,13 +153,11 @@ const ProfileMenuViewPixelTestParam kPixelTestParams[] = {
+     {
+         .pixel_test_param = {.test_suffix = "SignedIn_Sync"},
+         .signin_status = SigninStatusPixelTestParam::kSignedInWithSync,
+-        .disabled_features = {syncer::kReplaceSyncPromosWithSignInPromos},
+     },
+     {
+         .pixel_test_param = {.test_suffix = "SignedIn_SyncPaused",
+                              .use_dark_theme = true},
+         .signin_status = SigninStatusPixelTestParam::kSignedInSyncPaused,
+-        .disabled_features = {syncer::kReplaceSyncPromosWithSignInPromos},
+     },
+     {
+         .pixel_test_param = {.test_suffix = "SignInPending"},
+@@ -188,15 +183,8 @@ const ProfileMenuViewPixelTestParam kPixelTestParams[] = {
+         .pixel_test_param = {.test_suffix =
+                                  "SignedIn_BrowserSupervised_DarkTheme",
+                              .use_dark_theme = true},
+-        .signin_status = SigninStatusPixelTestParam::kSignedInNoSync,
+-        .management_status = ManagementStatus::kSupervisedUser,
+-    },
+-    {
+-        .pixel_test_param = {.test_suffix = "Sync_BrowserSupervised_DarkTheme",
+-                             .use_dark_theme = true},
+         .signin_status = SigninStatusPixelTestParam::kSignedInWithSync,
+         .management_status = ManagementStatus::kSupervisedUser,
+-        .disabled_features = {syncer::kReplaceSyncPromosWithSignInPromos},
+     },
+     {
+         .pixel_test_param =
+@@ -211,18 +199,8 @@ const ProfileMenuViewPixelTestParam kPixelTestParams[] = {
+                 .test_suffix = "SignedIn_BrowserSupervised",
+                 .use_dark_theme = false,
+             },
+-        .signin_status = SigninStatusPixelTestParam::kSignedInNoSync,
+-        .management_status = ManagementStatus::kSupervisedUser,
+-    },
+-    {
+-        .pixel_test_param =
+-            {
+-                .test_suffix = "Sync_BrowserSupervised",
+-                .use_dark_theme = false,
+-            },
+         .signin_status = SigninStatusPixelTestParam::kSignedInWithSync,
+         .management_status = ManagementStatus::kSupervisedUser,
+-        .disabled_features = {syncer::kReplaceSyncPromosWithSignInPromos},
+     },
+     {
+         .pixel_test_param =
+@@ -280,13 +258,12 @@ class ProfileMenuViewPixelTest
+  public:
+   ProfileMenuViewPixelTest()
+       : ProfilesPixelTestBaseT<DialogBrowserTest>(GetParam().pixel_test_param) {
+-    // 1. Get default-disabled features.
+     // Disabled by default but may be overridden by `extra_features_and_params`.
+     // `switches::kAvatarButtonSyncPromoForTesting` and
+     // `switches::kEnableHistorySyncOptinExpansionPill` are not compatible and
+     // cannot be activated at the same time. Params should ensure that one of
+     // the two (or none) are activated at the right time.
+-    base::flat_set<base::test::FeatureRef> disabled_features_set = {
++    base::flat_set<base::test::FeatureRef> disabled_features = {
+ #if BUILDFLAG(IS_WIN)
+         // The real flag is always disabled for simplicity, it is actually being
+         // replaced by `switches::kAvatarButtonSyncPromoForTesting` in tests to
+@@ -296,42 +273,22 @@ class ProfileMenuViewPixelTest
+ #endif
+         switches::kAvatarButtonSyncPromoForTesting,
+         switches::kEnableHistorySyncOptinExpansionPill};
+-
+-    // 2. Remove params-enabled features from the default-disabled set.
+     for (const auto& [feature, _] : GetParam().extra_features_and_params) {
+-      disabled_features_set.erase(feature.get());
++      disabled_features.erase(feature.get());
+     }
+ 
+-    // 3. Get default-enabled features.
+     std::vector<base::test::FeatureRefAndParams> enabled_features_and_params = {
+         {features::kEnterpriseProfileBadgingForMenu, {}},
+         {features::kEnterpriseProfileBadgingPolicies, {}},
+         {syncer::kReplaceSyncPromosWithSignInPromos, {}}};
+-
+-    // 4. Get default-enabled features without params-disabled.
+-    std::vector<base::test::FeatureRefAndParams>
+-        final_enabled_features_and_params;
+-    const base::flat_set<base::test::FeatureRef>& disabled_features =
+-        GetParam().disabled_features;
+-    for (const auto& feature_and_param : enabled_features_and_params) {
+-      if (!disabled_features.contains(feature_and_param.feature.get())) {
+-        final_enabled_features_and_params.push_back(feature_and_param);
+-      }
+-    }
+-
+-    // 5. Enrich collections with params-enabled/disabled features respectively.
+-    disabled_features_set.insert(disabled_features.begin(),
+-                                 disabled_features.end());
+     std::move(GetParam().extra_features_and_params.begin(),
+               GetParam().extra_features_and_params.end(),
+-              std::back_inserter(final_enabled_features_and_params));
++              std::back_inserter(enabled_features_and_params));
+ 
+     feature_list_.InitWithFeaturesAndParameters(
+-        std::vector<base::test::FeatureRefAndParams>(
+-            final_enabled_features_and_params.begin(),
+-            final_enabled_features_and_params.end()),
+-        std::vector<base::test::FeatureRef>(disabled_features_set.begin(),
+-                                            disabled_features_set.end()));
++        std::move(enabled_features_and_params),
++        std::vector<base::test::FeatureRef>(disabled_features.begin(),
++                                            disabled_features.end()));
+ 
+     // The Profile menu view seems not to be resizied properly on changes which
+     // causes the view to go out of bounds. This should not happen and needs to
+diff --git a/tools/metrics/histograms/metadata/profile/enums.xml b/tools/metrics/histograms/metadata/profile/enums.xml
+index d913b84f6ddc1..ae050372f2d80 100644
+--- a/tools/metrics/histograms/metadata/profile/enums.xml
++++ b/tools/metrics/histograms/metadata/profile/enums.xml
+@@ -457,7 +457,6 @@ chromium-metrics-reviews@google.com.
+   <int value="22" label="Autofill settings button"/>
+   <int value="23" label="(DEPRECATED): History sync opt-in button"/>
+   <int value="24" label="Batch upload button"/>
+-  <int value="25" label="Account settings button"/>
+ </enum>
+ 
+ <!-- LINT.ThenChange(//chrome/browser/ui/views/profiles/profile_menu_view_base.h:ActionableItem) -->
