@@ -1,0 +1,463 @@
+diff --git a/android_webview/browser/aw_settings.cc b/android_webview/browser/aw_settings.cc
+index 98d8a04dda09e..8c91c5190598a 100644
+--- a/android_webview/browser/aw_settings.cc
++++ b/android_webview/browser/aw_settings.cc
+@@ -242,32 +242,35 @@ void AwSettings::UpdateUserAgentLocked(JNIEnv* env,
+           blink::UserAgentMetadata();
+     }
+ 
+-    // Generate user-agent client hints in the following three cases:
+-    // 1. If user provide the user-agent metadata overrides, we use the
+-    // override data to populate the user-agent client hints.
+-    // 2. Otherwise, if override user-agent contains default user-agent, we
+-    // use system default user-agent metadata to populate the user-agent
+-    // client hints.
+-    // 3. Finally, if the above two cases don't match, we only populate system
+-    // default low-entropy client hints.
+-    if (ua_metadata_overridden) {
+-      ScopedJavaLocalRef<jobject> java_ua_metadata =
+-          Java_AwSettings_getUserAgentMetadataLocked(env, obj);
+-      override_ua_with_metadata.ua_metadata_override =
+-          FromJavaAwUserAgentMetadata(env, java_ua_metadata);
+-      LogUserAgentMetadataAvailableType(
+-          UserAgentMetadataAvailableType::kUserOverrides);
+-    } else if (base::Contains(ua_string_override, ua_default)) {
+-      override_ua_with_metadata.ua_metadata_override =
+-          AwClientHintsControllerDelegate::GetUserAgentMetadataOverrideBrand();
+-      LogUserAgentMetadataAvailableType(
+-          UserAgentMetadataAvailableType::kSystemDefault);
+-    } else {
+-      override_ua_with_metadata.ua_metadata_override =
+-          AwClientHintsControllerDelegate::GetUserAgentMetadataOverrideBrand(
+-              /*only_low_entropy_ch=*/true);
+-      LogUserAgentMetadataAvailableType(
+-          UserAgentMetadataAvailableType::kSystemDefaultLowEntropyOnly);
++    if (base::FeatureList::IsEnabled(blink::features::kUserAgentClientHint)) {
++      // Generate user-agent client hints in the following three cases:
++      // 1. If user provide the user-agent metadata overrides, we use the
++      // override data to populate the user-agent client hints.
++      // 2. Otherwise, if override user-agent contains default user-agent, we
++      // use system default user-agent metadata to populate the user-agent
++      // client hints.
++      // 3. Finally, if the above two cases don't match, we only populate system
++      // default low-entropy client hints.
++      if (ua_metadata_overridden) {
++        ScopedJavaLocalRef<jobject> java_ua_metadata =
++            Java_AwSettings_getUserAgentMetadataLocked(env, obj);
++        override_ua_with_metadata.ua_metadata_override =
++            FromJavaAwUserAgentMetadata(env, java_ua_metadata);
++        LogUserAgentMetadataAvailableType(
++            UserAgentMetadataAvailableType::kUserOverrides);
++      } else if (base::Contains(ua_string_override, ua_default)) {
++        override_ua_with_metadata.ua_metadata_override =
++            AwClientHintsControllerDelegate::
++                GetUserAgentMetadataOverrideBrand();
++        LogUserAgentMetadataAvailableType(
++            UserAgentMetadataAvailableType::kSystemDefault);
++      } else {
++        override_ua_with_metadata.ua_metadata_override =
++            AwClientHintsControllerDelegate::GetUserAgentMetadataOverrideBrand(
++                /*only_low_entropy_ch=*/true);
++        LogUserAgentMetadataAvailableType(
++            UserAgentMetadataAvailableType::kSystemDefaultLowEntropyOnly);
++      }
+     }
+ 
+     // Set overridden user-agent and default client hints metadata if applied.
+diff --git a/android_webview/java/src/org/chromium/android_webview/common/ProductionSupportedFlagList.java b/android_webview/java/src/org/chromium/android_webview/common/ProductionSupportedFlagList.java
+index 599a9a973737e..926fc95cb470f 100644
+--- a/android_webview/java/src/org/chromium/android_webview/common/ProductionSupportedFlagList.java
++++ b/android_webview/java/src/org/chromium/android_webview/common/ProductionSupportedFlagList.java
+@@ -144,6 +144,9 @@ public final class ProductionSupportedFlagList {
+         Flag.commandLine(
+                 AwSwitches.DEBUG_BSA,
+                 "Override and enable features useful for BSA library testing/debugging."),
++        Flag.baseFeature(
++                BlinkFeatures.USER_AGENT_CLIENT_HINT,
++                "Enables user-agent client hints in WebView."),
+         Flag.baseFeature(
+                 "DefaultPassthroughCommandDecoder", "Use the passthrough GLES2 command decoder."),
+         Flag.baseFeature(
+diff --git a/content/browser/client_hints/client_hints.cc b/content/browser/client_hints/client_hints.cc
+index cc868f5b51aeb..8e26d475fd8a7 100644
+--- a/content/browser/client_hints/client_hints.cc
++++ b/content/browser/client_hints/client_hints.cc
+@@ -520,6 +520,10 @@ bool IsValidURLForClientHints(const url::Origin& origin) {
+   return network::IsOriginPotentiallyTrustworthy(origin);
+ }
+ 
++bool UserAgentClientHintEnabled() {
++  return base::FeatureList::IsEnabled(blink::features::kUserAgentClientHint);
++}
++
+ void AddUAHeader(net::HttpRequestHeaders* headers,
+                  WebClientHintsType type,
+                  const std::string& value) {
+@@ -836,7 +840,8 @@ void UpdateNavigationRequestClientUaHeaders(
+     net::HttpRequestHeaders* headers,
+     const std::optional<GURL>& request_url) {
+   DCHECK(frame_tree_node);
+-  if (!ShouldAddClientHints(origin, frame_tree_node, delegate, request_url)) {
++  if (!UserAgentClientHintEnabled() ||
++      !ShouldAddClientHints(origin, frame_tree_node, delegate, request_url)) {
+     return;
+   }
+ 
+@@ -900,10 +905,12 @@ void AddRequestClientHintsHeaders(
+     AddEctHeader(headers, network_quality_tracker, url);
+   }
+ 
+-  UpdateNavigationRequestClientUaHeadersImpl(
+-      delegate, is_ua_override_on, frame_tree_node,
+-      ClientUaHeaderCallType::kDuringCreation, headers, container_policy, data,
+-      ftn_for_devtools_override);
++  if (UserAgentClientHintEnabled()) {
++  UpdateNavigationRequestClientUaHeadersImpl(
++      delegate, is_ua_override_on, frame_tree_node,
++      ClientUaHeaderCallType::kDuringCreation, headers, container_policy, data,
++      ftn_for_devtools_override);
++  }
+ 
+   if (ShouldAddClientHint(data, WebClientHintsType::kPrefersColorScheme)) {
+     AddPrefersColorSchemeHeader(headers, frame_tree_node);
+diff --git a/content/browser/web_contents/web_contents_impl_browsertest.cc b/content/browser/web_contents/web_contents_impl_browsertest.cc
+index 56b1fe625f0b8..6ae910a950510 100644
+--- a/content/browser/web_contents/web_contents_impl_browsertest.cc
++++ b/content/browser/web_contents/web_contents_impl_browsertest.cc
+@@ -2635,6 +2635,8 @@ class WebContentsImplBrowserTestClientHintsEnabled
+  public:
+   void SetUp() override {
+     scoped_feature_list_.Reset();
++    scoped_feature_list_.InitAndEnableFeature(
++        blink::features::kUserAgentClientHint);
+     WebContentsImplBrowserTest::SetUp();
+   }
+ };
+diff --git a/content/public/common/content_switch_dependent_feature_overrides.cc b/content/public/common/content_switch_dependent_feature_overrides.cc
+index 3291905e9b66e..582fad5de68b3 100644
+--- a/content/public/common/content_switch_dependent_feature_overrides.cc
++++ b/content/public/common/content_switch_dependent_feature_overrides.cc
+@@ -44,6 +44,9 @@ GetSwitchDependentFeatureOverrides(const base::CommandLine& command_line) {
+       {switches::kEnableExperimentalWebPlatformFeatures,
+        std::cref(features::kExperimentalContentSecurityPolicyFeatures),
+        base::FeatureList::OVERRIDE_ENABLE_FEATURE},
++    {switches::kEnableExperimentalWebPlatformFeatures,
++     std::cref(blink::features::kUserAgentClientHint),
++     base::FeatureList::OVERRIDE_ENABLE_FEATURE},
+       {switches::kEnableExperimentalWebPlatformFeatures,
+        std::cref(features::kOriginIsolationHeader),
+        base::FeatureList::OVERRIDE_ENABLE_FEATURE},
+diff --git a/testing/variations/fieldtrial_testing_config.json b/testing/variations/fieldtrial_testing_config.json
+index 177f984c53a20..b5e20fe5d536d 100644
+--- a/testing/variations/fieldtrial_testing_config.json
++++ b/testing/variations/fieldtrial_testing_config.json
+@@ -19519,6 +19519,21 @@
+             ]
+         }
+     ],
++    "UserAgentClientHintsAndroidWebView": [
++        {
++            "platforms": [
++                "android_webview"
++            ],
++            "experiments": [
++                {
++                    "name": "Enabled",
++                    "enable_features": [
++                        "UserAgentClientHint"
++                    ]
++                }
++            ]
++        }
++    ],
+     "UserBypassUI": [
+         {
+             "platforms": [
+diff --git a/third_party/blink/common/client_hints/enabled_client_hints.cc b/third_party/blink/common/client_hints/enabled_client_hints.cc
+index a6df881aaa710..a8f95dd73aae3 100644
+--- a/third_party/blink/common/client_hints/enabled_client_hints.cc
++++ b/third_party/blink/common/client_hints/enabled_client_hints.cc
+@@ -26,7 +26,14 @@ bool IsDisabledByFeature(const WebClientHintsType type) {
+     case WebClientHintsType::kUAFullVersionList:
+     case WebClientHintsType::kUABitness:
+     case WebClientHintsType::kUAWoW64:
++      if (!base::FeatureList::IsEnabled(features::kUserAgentClientHint))
++        return true;
++      break;
+     case WebClientHintsType::kUAFormFactors:
++      if (!base::FeatureList::IsEnabled(features::kUserAgentClientHint)) {
++        return true;
++      }
++      break;
+     case WebClientHintsType::kPrefersColorScheme:
+     case WebClientHintsType::kViewportHeight:
+     case WebClientHintsType::kDeviceMemory:
+diff --git a/third_party/blink/renderer/core/frame/navigator_ua.idl b/third_party/blink/renderer/core/frame/navigator_ua.idl
+index 3a74d65965039..00669e1ddcea0 100644
+--- a/third_party/blink/renderer/core/frame/navigator_ua.idl
++++ b/third_party/blink/renderer/core/frame/navigator_ua.idl
+@@ -4,6 +4,8 @@
+ 
+ // https://github.com/WICG/ua-client-hints
+ 
+-interface mixin NavigatorUA {
++[
++    RuntimeEnabled=UserAgentClientHint
++] interface mixin NavigatorUA {
+   [SecureContext] readonly attribute NavigatorUAData userAgentData;
+ };
+diff --git a/third_party/blink/renderer/core/frame/navigator_ua_data.idl b/third_party/blink/renderer/core/frame/navigator_ua_data.idl
+index 22a59c6ac2682..d241c3cfbb163 100644
+--- a/third_party/blink/renderer/core/frame/navigator_ua_data.idl
++++ b/third_party/blink/renderer/core/frame/navigator_ua_data.idl
+@@ -4,7 +4,10 @@
+ 
+ // https://github.com/WICG/ua-client-hints
+ 
+-[Exposed=(Window,Worker)] interface NavigatorUAData {
++[
++    RuntimeEnabled=UserAgentClientHint,
++    Exposed=(Window,Worker)
++] interface NavigatorUAData {
+   [HighEntropy, MeasureAs=NavigatorUAData_Brands] readonly attribute FrozenArray<NavigatorUABrandVersion> brands;
+   [HighEntropy=Direct, MeasureAs=NavigatorUAData_Mobile]  readonly attribute boolean mobile;
+   [HighEntropy=Direct, MeasureAs=NavigatorUAData_Platform] readonly attribute DOMString platform;
+diff --git a/third_party/blink/renderer/core/loader/frame_fetch_context.cc b/third_party/blink/renderer/core/loader/frame_fetch_context.cc
+index 18ed4f54eff27..758d94a81bfac 100644
+--- a/third_party/blink/renderer/core/loader/frame_fetch_context.cc
++++ b/third_party/blink/renderer/core/loader/frame_fetch_context.cc
+@@ -329,7 +329,7 @@ void BaseFetchContext::AddClientHintsIfNecessary(
+   }
+ 
+   // Only send User Agent hints if the info is available
+-  if (ua) {
++  if (RuntimeEnabledFeatures::UserAgentClientHintEnabled() && ua) {
+     // ShouldSendClientHint is called to make sure UA is controlled by
+     // Permissions Policy.
+     if (ShouldSendClientHint(*policy, resource_origin, is_1p_origin,
+diff --git a/third_party/blink/renderer/platform/runtime_enabled_features.json5 b/third_party/blink/renderer/platform/runtime_enabled_features.json5
+index 266ba07714828..9edcd9b8960fe 100644
+--- a/third_party/blink/renderer/platform/runtime_enabled_features.json5
++++ b/third_party/blink/renderer/platform/runtime_enabled_features.json5
+@@ -3948,6 +3948,10 @@
+       name: "UseUndoStepElementDispatchBeforeInput",
+       status: "stable",
+     },
++    {
++      name: "UserAgentClientHint",
++      status: "stable",
++    },
+     {
+       name: "V8IdleTasks",
+       base_feature: "none",
+diff --git a/third_party/blink/web_tests/VirtualTestSuites b/third_party/blink/web_tests/VirtualTestSuites
+index 4527970138caa..fd5b3ea92c920 100644
+--- a/third_party/blink/web_tests/VirtualTestSuites
++++ b/third_party/blink/web_tests/VirtualTestSuites
+@@ -1036,6 +1036,15 @@
+     ],
+     "expires": "never"
+   },
++  {
++    "prefix": "disable-ua-client-hint",
++    "platforms": ["Linux", "Mac", "Win"],
++    "bases": ["external/wpt/client-hints", "wpt_internal/client-hints"],
++    "args": ["--disable-features=UserAgentClientHint",
++             "--disable-threaded-compositing", "--disable-threaded-animation"],
++    "expires": "Jul 1, 2024",
++    "owners": ["victortan@chromium.org"]
++  },
+   {
+     "prefix": "web-bluetooth-new-permissions-backend",
+     "platforms": [
+diff --git a/third_party/blink/web_tests/virtual/disable-ua-client-hint/README.md b/third_party/blink/web_tests/virtual/disable-ua-client-hint/README.md
+new file mode 100644
+index 0000000000000..379ed7884f9cd
+--- /dev/null
++++ b/third_party/blink/web_tests/virtual/disable-ua-client-hint/README.md
+@@ -0,0 +1,2 @@
++This virtual test suite ensures the UserAgentClientHint feature and runtime
++feature disable correctly.
+diff --git a/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/accept-ch-stickiness/cross-origin-iframe-redirect-with-fp-delegation.https-expected.txt b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/accept-ch-stickiness/cross-origin-iframe-redirect-with-fp-delegation.https-expected.txt
+new file mode 100644
+index 0000000000000..f6a2bad8dd7e7
+--- /dev/null
++++ b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/accept-ch-stickiness/cross-origin-iframe-redirect-with-fp-delegation.https-expected.txt
+@@ -0,0 +1,5 @@
++This is a testharness.js-based test.
++[FAIL] Iframe redirect with Feature Policy delegation got client hints according to expectations.
++  assert_equals: message from opened frame expected "PASS" but got "UA"
++Harness: the test ran to completion.
++
+diff --git a/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/accept-ch-stickiness/cross-origin-subresource-redirect-with-fp-delegation.https-expected.txt b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/accept-ch-stickiness/cross-origin-subresource-redirect-with-fp-delegation.https-expected.txt
+new file mode 100644
+index 0000000000000..3c271ffa18acb
+--- /dev/null
++++ b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/accept-ch-stickiness/cross-origin-subresource-redirect-with-fp-delegation.https-expected.txt
+@@ -0,0 +1,5 @@
++This is a testharness.js-based test.
++[FAIL] cross-origin subresource redirect with Feature Policy delegation got client hints according to expectations.
++  assert_true: expected true got false
++Harness: the test ran to completion.
++
+diff --git a/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/accept-ch-stickiness/same-origin-navigation-redirect.https-expected.txt b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/accept-ch-stickiness/same-origin-navigation-redirect.https-expected.txt
+new file mode 100644
+index 0000000000000..80dfea025399f
+--- /dev/null
++++ b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/accept-ch-stickiness/same-origin-navigation-redirect.https-expected.txt
+@@ -0,0 +1,5 @@
++This is a testharness.js-based test.
++[FAIL] redirect on navigation got client hints according to expectations.
++  assert_equals: message from opened page expected "PASS" but got "UA"
++Harness: the test ran to completion.
++
+diff --git a/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/accept-ch-stickiness/same-origin-subresource-redirect-opted-in.https-expected.txt b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/accept-ch-stickiness/same-origin-subresource-redirect-opted-in.https-expected.txt
+new file mode 100644
+index 0000000000000..85c30f55d9f35
+--- /dev/null
++++ b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/accept-ch-stickiness/same-origin-subresource-redirect-opted-in.https-expected.txt
+@@ -0,0 +1,5 @@
++This is a testharness.js-based test.
++[FAIL] same-origin subresource redirect with opt-in got client hints according to expectations.
++  assert_true: expected true got false
++Harness: the test ran to completion.
++
+diff --git a/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/accept-ch.wildcard.https.sub-expected.txt b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/accept-ch.wildcard.https.sub-expected.txt
+new file mode 100644
+index 0000000000000..dbb2120cadb18
+--- /dev/null
++++ b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/accept-ch.wildcard.https.sub-expected.txt
+@@ -0,0 +1,5 @@
++This is a testharness.js-based test.
++[FAIL] Accept-CH with wildcard policy and iframe subresource
++  assert_equals: expected "HadPlatformVersion" but got "MissingPlatformVersion"
++Harness: the test ran to completion.
++
+diff --git a/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/accept-ch/feature-policy-navigation/feature-policy.https-expected.txt b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/accept-ch/feature-policy-navigation/feature-policy.https-expected.txt
+new file mode 100644
+index 0000000000000..37bb28b032c90
+--- /dev/null
++++ b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/accept-ch/feature-policy-navigation/feature-policy.https-expected.txt
+@@ -0,0 +1,9 @@
++This is a testharness.js-based test.
++[FAIL] Client hints loaded on cross-origin iframe request with feature policy.
++  promise_test: Unhandled rejection with value: "FAIL sec-ch-ua-platform True None"
++[FAIL] Client hints loaded on same-origin iframe request with feature policy.
++  promise_test: Unhandled rejection with value: "FAIL sec-ch-ua True None"
++[FAIL] Client hints loaded on cross-origin iframe request with feature policy after attempting to set independently.
++  promise_test: Unhandled rejection with value: "FAIL sec-ch-ua-platform True None"
++Harness: the test ran to completion.
++
+diff --git a/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/accept-ch/feature-policy-navigation/no-feature-policy.https-expected.txt b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/accept-ch/feature-policy-navigation/no-feature-policy.https-expected.txt
+new file mode 100644
+index 0000000000000..cf4d3c2249d40
+--- /dev/null
++++ b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/accept-ch/feature-policy-navigation/no-feature-policy.https-expected.txt
+@@ -0,0 +1,11 @@
++This is a testharness.js-based test.
++[FAIL] Client hints not loaded on cross-origin iframe request with no feature policy.
++  promise_test: Unhandled rejection with value: "FAIL sec-ch-ua True None"
++[FAIL] Client hints loaded on same-origin iframe request with no feature policy.
++  promise_test: Unhandled rejection with value: "FAIL sec-ch-ua True None"
++[FAIL] Client hints loaded on cross-origin iframe request with allow list.
++  promise_test: Unhandled rejection with value: "FAIL sec-ch-ua-platform True None"
++[FAIL] Client hints loaded on same-origin iframe request with allow list.
++  promise_test: Unhandled rejection with value: "FAIL sec-ch-ua True None"
++Harness: the test ran to completion.
++
+diff --git a/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/accept-ch/feature-policy.sub.https-expected.txt b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/accept-ch/feature-policy.sub.https-expected.txt
+new file mode 100644
+index 0000000000000..28df11777e9b0
+--- /dev/null
++++ b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/accept-ch/feature-policy.sub.https-expected.txt
+@@ -0,0 +1,5 @@
++This is a testharness.js-based test.
++[FAIL] Accept-CH header test
++  assert_true: expected true got false
++Harness: the test ran to completion.
++
+diff --git a/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/http-equiv-accept-ch-iframe.https-expected.txt b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/http-equiv-accept-ch-iframe.https-expected.txt
+new file mode 100644
+index 0000000000000..65073c258f4b0
+--- /dev/null
++++ b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/http-equiv-accept-ch-iframe.https-expected.txt
+@@ -0,0 +1,7 @@
++This is a testharness.js-based test.
++[FAIL] Client hints loaded on same-origin iframe should include hints with a default permissions policy ofself and *, but the http-equiv meta tag has a bug and it doesn't impact iframes.
++  promise_test: Unhandled rejection with value: "FAIL sec-ch-ua True None"
++[FAIL] Client hints loaded on cross-origin iframe only include hints with a default permissions policy of *.
++  promise_test: Unhandled rejection with value: "FAIL sec-ch-ua True None"
++Harness: the test ran to completion.
++
+diff --git a/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/meta-equiv-delegate-ch-iframe.https-expected.txt b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/meta-equiv-delegate-ch-iframe.https-expected.txt
+new file mode 100644
+index 0000000000000..5249b910e06e1
+--- /dev/null
++++ b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/meta-equiv-delegate-ch-iframe.https-expected.txt
+@@ -0,0 +1,7 @@
++This is a testharness.js-based test.
++[FAIL] Client hints loaded on same-origin iframe include hints with a default permissions policy of self and *.
++  promise_test: Unhandled rejection with value: "FAIL sec-ch-ua True None"
++[FAIL] Client hints loaded on cross-origin iframe only include hints with a default permissions policy of *.
++  promise_test: Unhandled rejection with value: "FAIL sec-ch-ua True None"
++Harness: the test ran to completion.
++
+diff --git a/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/sandbox/iframe-csp-same-origin.https-expected.txt b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/sandbox/iframe-csp-same-origin.https-expected.txt
+new file mode 100644
+index 0000000000000..44321905d5840
+--- /dev/null
++++ b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/sandbox/iframe-csp-same-origin.https-expected.txt
+@@ -0,0 +1,5 @@
++This is a testharness.js-based test.
++[FAIL] CSP sandboxed iframe with same-origin flag does send client hint headers
++  assert_equals: message from opened frame expected "PASS" but got "FAIL sec-ch-ua True None"
++Harness: the test ran to completion.
++
+diff --git a/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/sandbox/iframe-csp.https-expected.txt b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/sandbox/iframe-csp.https-expected.txt
+new file mode 100644
+index 0000000000000..01bda2b135ea5
+--- /dev/null
++++ b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/sandbox/iframe-csp.https-expected.txt
+@@ -0,0 +1,5 @@
++This is a testharness.js-based test.
++[FAIL] CSP sandboxed iframe does not send client hint headers
++  assert_equals: message from opened frame expected "PASS" but got "FAIL sec-ch-ua True None"
++Harness: the test ran to completion.
++
+diff --git a/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/sandbox/iframe-same-origin.https-expected.txt b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/sandbox/iframe-same-origin.https-expected.txt
+new file mode 100644
+index 0000000000000..7dbd3806d91a0
+--- /dev/null
++++ b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/sandbox/iframe-same-origin.https-expected.txt
+@@ -0,0 +1,5 @@
++This is a testharness.js-based test.
++[FAIL] Same origin sandboxed iframe with allow-same-origin flag does send client hint headers
++  assert_equals: message from opened frame expected "PASS" but got "FAIL sec-ch-ua True None"
++Harness: the test ran to completion.
++
+diff --git a/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/sandbox/iframe.https-expected.txt b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/sandbox/iframe.https-expected.txt
+new file mode 100644
+index 0000000000000..e319bd8fc5f0d
+--- /dev/null
++++ b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/sandbox/iframe.https-expected.txt
+@@ -0,0 +1,5 @@
++This is a testharness.js-based test.
++[FAIL] sandboxed iframe does not send client hint headers
++  assert_equals: message from opened frame expected "PASS" but got "FAIL sec-ch-ua True None"
++Harness: the test ran to completion.
++
+diff --git a/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/sec-ch-ua.https-expected.txt b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/sec-ch-ua.https-expected.txt
+new file mode 100644
+index 0000000000000..b465f59d05b42
+--- /dev/null
++++ b/third_party/blink/web_tests/virtual/disable-ua-client-hint/external/wpt/client-hints/sec-ch-ua.https-expected.txt
+@@ -0,0 +1,9 @@
++This is a testharness.js-based test.
++[FAIL] Open HTTPS window: `Sec-CH-UA` header returned by default.
++  assert_not_equals: `Sec-CH-UA` is sent. got disallowed value ""
++[FAIL] Open HTTPS window: `Sec-CH-UA` header is consistent across versions.
++  assert_not_equals: The `Sec-CH-UA` header is delivered. got disallowed value ""
++[FAIL] Open HTTPS window: No brand in `Sec-CH-UA` header is > than 32 chars.
++  assert_true: A well-formed Sec-CH-UA header must have version (v=) params expected true got false
++Harness: the test ran to completion.
++
