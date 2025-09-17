@@ -1,0 +1,13 @@
+diff --git a/chrome/browser/obsolete_system/obsolete_system_win.cc b/chrome/browser/obsolete_system/obsolete_system_win.cc
+index dcf4bbabf8284..2252b8f8c642a 100644
+--- a/chrome/browser/obsolete_system/obsolete_system_win.cc
++++ b/chrome/browser/obsolete_system/obsolete_system_win.cc
+@@ -15,7 +15,7 @@
+ }
+ 
+ bool IsObsoleteOsVersion() {
+-  return GetRealOSVersion() < base::win::Version::WIN10;
++  return GetRealOSVersion() < base::win::Version::WIN7;
+ }
+ 
+ }  // namespace
