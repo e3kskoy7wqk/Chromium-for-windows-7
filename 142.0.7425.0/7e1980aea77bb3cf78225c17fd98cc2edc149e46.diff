@@ -1,0 +1,125 @@
+diff --git a/chrome/browser/ui/views/profiles/profile_menu_view.cc b/chrome/browser/ui/views/profiles/profile_menu_view.cc
+index af4d60c78c171..e7b74b80b42bb 100644
+--- a/chrome/browser/ui/views/profiles/profile_menu_view.cc
++++ b/chrome/browser/ui/views/profiles/profile_menu_view.cc
+@@ -331,14 +331,6 @@ void ProfileMenuView::OnSyncSettingsButtonClicked() {
+   chrome::ShowSettingsSubPage(&browser(), chrome::kSyncSetupSubPage);
+ }
+ 
+-void ProfileMenuView::OnAccountSettingsButtonClicked() {
+-  OnActionableItemClicked(ActionableItem::kAccountSettingsButton);
+-  if (!perform_menu_actions()) {
+-    return;
+-  }
+-  chrome::ShowSettingsSubPage(&browser(), chrome::kPeopleSubPage);
+-}
+-
+ void ProfileMenuView::OnSyncErrorButtonClicked(AvatarSyncErrorType error) {
+   OnActionableItemClicked(ActionableItem::kSyncErrorButton);
+   if (!perform_menu_actions()) {
+@@ -854,35 +846,6 @@ void ProfileMenuView::MaybeBuildChromeAccountSettingsButton() {
+     return;
+   }
+ 
+-  // Show the settings button only when signed in to Chrome or pending sign in.
+-  switch (signin_util::GetSignedInState(identity_manager)) {
+-    case signin_util::SignedInState::kSignInPending:
+-    case signin_util::SignedInState::kSignedIn:
+-      break;
+-    case signin_util::SignedInState::kSyncPaused:
+-    case signin_util::SignedInState::kSignedOut:
+-    case signin_util::SignedInState::kWebOnlySignedIn:
+-    case signin_util::SignedInState::kSyncing:
+-      return;
+-  }
+-
+-  AddFeatureButton(
+-      l10n_util::GetStringUTF16(IDS_PROFILE_MENU_ACCOUNT_SETTINGS_BUTTON),
+-      base::BindRepeating(&ProfileMenuView::OnAccountSettingsButtonClicked,
+-                          base::Unretained(this)),
+-      vector_icons::kSettingsChromeRefreshIcon);
+-}
+-
+-void ProfileMenuView::MaybeBuildChromeAccountSettingsButtonWithSync() {
+-  CHECK(!profile().IsGuestSession());
+-
+-  signin::IdentityManager* identity_manager =
+-      IdentityManagerFactory::GetForProfile(&profile());
+-
+-  if (!identity_manager) {
+-    return;
+-  }
+-
+   // Show the settings button when signed in to Chrome or to the web, or if
+   // signin is disallowed.
+   const bool should_show_settings_button =
+@@ -1026,9 +989,7 @@ void ProfileMenuView::BuildFeatureButtons() {
+   BuildAutofillSettingsButton();
+   MaybeBuildManageGoogleAccountButton();
+   BuildCustomizeProfileButton();
+-  base::FeatureList::IsEnabled(syncer::kReplaceSyncPromosWithSignInPromos)
+-      ? MaybeBuildChromeAccountSettingsButton()
+-      : MaybeBuildChromeAccountSettingsButtonWithSync();
++  MaybeBuildChromeAccountSettingsButton();
+   MaybeBuildCloseBrowsersButton();
+   MaybeBuildSignoutButton();
+ }
+diff --git a/chrome/browser/ui/views/profiles/profile_menu_view.h b/chrome/browser/ui/views/profiles/profile_menu_view.h
+index b78d6df36473b..5e6c8b99c4f87 100644
+--- a/chrome/browser/ui/views/profiles/profile_menu_view.h
++++ b/chrome/browser/ui/views/profiles/profile_menu_view.h
+@@ -82,7 +82,6 @@ class ProfileMenuView : public ProfileMenuViewBase {
+   void OnGuestProfileButtonClicked();
+   void OnExitProfileButtonClicked();
+   void OnSyncSettingsButtonClicked();
+-  void OnAccountSettingsButtonClicked();
+   void OnSyncErrorButtonClicked(AvatarSyncErrorType error);
+   void OnSigninButtonClicked(CoreAccountInfo account,
+                              ActionableItem button_type,
+@@ -106,7 +105,6 @@ class ProfileMenuView : public ProfileMenuViewBase {
+   void MaybeBuildBatchUploadButton();
+   void BuildAutofillSettingsButton();
+   void BuildCustomizeProfileButton();
+-  void MaybeBuildChromeAccountSettingsButtonWithSync();
+   void MaybeBuildChromeAccountSettingsButton();
+   void MaybeBuildManageGoogleAccountButton();
+   void MaybeBuildCloseBrowsersButton();
+diff --git a/chrome/browser/ui/views/profiles/profile_menu_view_base.h b/chrome/browser/ui/views/profiles/profile_menu_view_base.h
+index 896785a33c6e5..d2c881fa78c1a 100644
+--- a/chrome/browser/ui/views/profiles/profile_menu_view_base.h
++++ b/chrome/browser/ui/views/profiles/profile_menu_view_base.h
+@@ -81,8 +81,7 @@ class ProfileMenuViewBase : public content::WebContentsDelegate,
+     kAutofillSettingsButton = 22,
+     // DEPRECATED: kHistorySyncOptInButton = 23,
+     kBatchUploadButton = 24,
+-    kAccountSettingsButton = 25,
+-    kMaxValue = kAccountSettingsButton,
++    kMaxValue = kBatchUploadButton,
+   };
+   // LINT.ThenChange(//tools/metrics/histograms/metadata/profile/enums.xml:ProfileMenuActionableItem)
+ 
+diff --git a/chrome/browser/ui/views/profiles/profile_menu_view_browsertest.cc b/chrome/browser/ui/views/profiles/profile_menu_view_browsertest.cc
+index e374efa52ae9a..511f34408c169 100644
+--- a/chrome/browser/ui/views/profiles/profile_menu_view_browsertest.cc
++++ b/chrome/browser/ui/views/profiles/profile_menu_view_browsertest.cc
+@@ -1397,7 +1397,7 @@ constexpr std::array kActionableItems_WithPromoButton = {
+     ProfileMenuViewBase::ActionableItem::kAutofillSettingsButton,
+     ProfileMenuViewBase::ActionableItem::kManageGoogleAccountButton,
+     ProfileMenuViewBase::ActionableItem::kEditProfileButton,
+-    ProfileMenuViewBase::ActionableItem::kAccountSettingsButton,
++    ProfileMenuViewBase::ActionableItem::kSyncSettingsButton,
+     ProfileMenuViewBase::ActionableItem::kSignoutButton,
+     ProfileMenuViewBase::ActionableItem::kAddNewProfileButton,
+     ProfileMenuViewBase::ActionableItem::kGuestProfileButton,
+diff --git a/tools/metrics/histograms/metadata/profile/enums.xml b/tools/metrics/histograms/metadata/profile/enums.xml
+index d913b84f6ddc1..ae050372f2d80 100644
+--- a/tools/metrics/histograms/metadata/profile/enums.xml
++++ b/tools/metrics/histograms/metadata/profile/enums.xml
+@@ -457,7 +457,6 @@ chromium-metrics-reviews@google.com.
+   <int value="22" label="Autofill settings button"/>
+   <int value="23" label="(DEPRECATED): History sync opt-in button"/>
+   <int value="24" label="Batch upload button"/>
+-  <int value="25" label="Account settings button"/>
+ </enum>
+ 
+ <!-- LINT.ThenChange(//chrome/browser/ui/views/profiles/profile_menu_view_base.h:ActionableItem) -->

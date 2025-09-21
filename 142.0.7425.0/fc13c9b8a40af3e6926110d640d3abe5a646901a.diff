@@ -1,0 +1,415 @@
+diff --git a/chrome/app/profiles_strings.grdp b/chrome/app/profiles_strings.grdp
+index 73cd97a445550..f9776dace4b9f 100644
+--- a/chrome/app/profiles_strings.grdp
++++ b/chrome/app/profiles_strings.grdp
+@@ -170,12 +170,6 @@
+     <message name="IDS_PROFILE_MENU_AUTOFILL_SETTINGS_BUTTON" desc="Button in the avatar menu bubble view for opening Chrome autofill settings.">
+       Passwords and autofill
+     </message>
+-    <message name="IDS_PROFILE_MENU_BATCH_UPLOAD_BUTTON" desc="Button in the profile menu to open the Batch Upload dialog.">
+-      {0, plural,
+-      =1 {Save 1 item in account}
+-      other {Save # items in account}
+-      }
+-    </message>
+   </if>
+   <if expr="use_titlecase">
+     <message name="IDS_PROFILES_PROFILE_MANAGE_ACCOUNTS_BUTTON" desc="Button in the avatar menu bubble view used to manage accounts for a profile.">
+@@ -205,12 +199,6 @@
+     <message name="IDS_PROFILE_MENU_AUTOFILL_SETTINGS_BUTTON" desc="Button in the avatar menu bubble view for opening Chrome autofill settings.">
+       Passwords and Autofill
+     </message>
+-    <message name="IDS_PROFILE_MENU_BATCH_UPLOAD_BUTTON" desc="Button in the profile menu to open the Batch Upload dialog.">
+-      {0, plural,
+-      =1 {Save 1 Item in Account}
+-      other {Save # Items in Account}
+-      }
+-    </message>
+   </if>
+   <message name="IDS_PROFILES_MANAGED_BY" desc="Label shown under the avatar in the avatar menu bubble view stating that the account is managed.">
+     Managed by <ph name="VALUE">$1<ex>1</ex></ph>
+diff --git a/chrome/app/profiles_strings_grdp/IDS_PROFILE_MENU_BATCH_UPLOAD_BUTTON.png.sha1 b/chrome/app/profiles_strings_grdp/IDS_PROFILE_MENU_BATCH_UPLOAD_BUTTON.png.sha1
+deleted file mode 100644
+index dbf15220aaf3d..0000000000000
+--- a/chrome/app/profiles_strings_grdp/IDS_PROFILE_MENU_BATCH_UPLOAD_BUTTON.png.sha1
++++ /dev/null
+@@ -1 +0,0 @@
+-7d72c4fd4776c5d55437c4edd2f42025f5c86d5d
+\ No newline at end of file
+diff --git a/chrome/browser/ui/color/chrome_color_id.h b/chrome/browser/ui/color/chrome_color_id.h
+index d8d49065acfbf..8228fdfa4615b 100644
+--- a/chrome/browser/ui/color/chrome_color_id.h
++++ b/chrome/browser/ui/color/chrome_color_id.h
+@@ -476,7 +476,7 @@
+   E_CPONLY(kColorProfileMenuIdentityInfoBackground) \
+   E_CPONLY(kColorProfileMenuIdentityInfoTitle) \
+   E_CPONLY(kColorProfileMenuIdentityInfoSubtitle) \
+-  E_CPONLY(kColorProfileMenuPromoButtonsBackground) \
++  E_CPONLY(kColorProfileMenuSyncPromoButtonBackground) \
+   /* Profiles colors. */ \
+   E_CPONLY(kColorProfilesReauthDialogBorder) \
+   /* PWA colors. */ \
+diff --git a/chrome/browser/ui/color/material_chrome_color_mixer.cc b/chrome/browser/ui/color/material_chrome_color_mixer.cc
+index 2ed20c5a1ea5d..4ea5794601b36 100644
+--- a/chrome/browser/ui/color/material_chrome_color_mixer.cc
++++ b/chrome/browser/ui/color/material_chrome_color_mixer.cc
+@@ -130,7 +130,7 @@ void AddMaterialChromeColorMixer(ui::ColorProvider* provider,
+   mixer[kColorProfileMenuIdentityInfoBackground] = {ui::kColorSysSurface3};
+   mixer[kColorProfileMenuIdentityInfoTitle] = {ui::kColorSysOnSurface};
+   mixer[kColorProfileMenuIdentityInfoSubtitle] = {ui::kColorSysOnSurfaceSubtle};
+-  mixer[kColorProfileMenuPromoButtonsBackground] = {
++  mixer[kColorProfileMenuSyncPromoButtonBackground] = {
+       ui::kColorSysTonalContainer};
+ 
+   // Signin bubble colors. Main background color uses the same color as the
+diff --git a/chrome/browser/ui/views/profiles/profile_menu_view.cc b/chrome/browser/ui/views/profiles/profile_menu_view.cc
+index 3420da77f0cac..e2d45fe864749 100644
+--- a/chrome/browser/ui/views/profiles/profile_menu_view.cc
++++ b/chrome/browser/ui/views/profiles/profile_menu_view.cc
+@@ -26,8 +26,6 @@
+ #include "chrome/browser/enterprise/util/managed_browser_utils.h"
+ #include "chrome/browser/feature_engagement/tracker_factory.h"
+ #include "chrome/browser/lifetime/application_lifetime.h"
+-#include "chrome/browser/profiles/batch_upload/batch_upload_service.h"
+-#include "chrome/browser/profiles/batch_upload/batch_upload_service_factory.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/profiles/profile_attributes_entry.h"
+ #include "chrome/browser/profiles/profile_avatar_icon_util.h"
+@@ -80,7 +78,6 @@
+ #include "components/signin/public/identity_manager/account_info.h"
+ #include "components/signin/public/identity_manager/primary_account_mutator.h"
+ #include "components/strings/grit/components_strings.h"
+-#include "components/sync/base/features.h"
+ #include "components/sync/service/sync_service.h"
+ #include "components/vector_icons/vector_icons.h"
+ #include "net/base/url_util.h"
+@@ -97,7 +94,6 @@
+ #include "ui/gfx/paint_vector_icon.h"
+ #include "ui/strings/grit/ui_strings.h"
+ #include "ui/views/accessibility/view_accessibility.h"
+-#include "ui/views/widget/widget.h"
+ 
+ #if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
+ #include "chrome/browser/enterprise/signin/enterprise_signin_prefs.h"
+@@ -516,16 +512,6 @@ void ProfileMenuView::OnAutofillSettingsButtonClicked() {
+   chrome::ShowSettingsSubPage(&browser(), chrome::kAutofillSubPage);
+ }
+ 
+-void ProfileMenuView::OnBuildBatchUploadButtonClicked() {
+-  OnActionableItemClicked(ActionableItem::kBatchUploadButton);
+-  if (!perform_menu_actions()) {
+-    return;
+-  }
+-  BatchUploadServiceFactory::GetForProfile(&profile())
+-      ->OpenBatchUpload(&browser(),
+-                        BatchUploadService::EntryPoint::kProfileMenu);
+-}
+-
+ void ProfileMenuView::SetMenuTitleForAccessibility() {
+   const signin::IdentityManager* identity_manager =
+       IdentityManagerFactory::GetForProfile(&profile());
+@@ -669,10 +669,7 @@ ProfileMenuView::GetIdentitySectionParams(const ProfileAttributesEntry& entry) {
+         // Non-personalized signin button.
+         button_type = ActionableItem::kSigninButton;
+         params.subtitle = l10n_util::GetStringUTF16(
+-            base::FeatureList::IsEnabled(
+-                syncer::kReplaceSyncPromosWithSignInPromos)
+-                ? IDS_PROFILE_MENU_SIGNIN_PROMO_DESCRIPTION_WITH_BOOKMARKS
+-                : IDS_PROFILE_MENU_SIGNIN_PROMO_DESCRIPTION);
++            IDS_PROFILE_MENU_SIGNIN_PROMO_DESCRIPTION);
+         params.button_text =
+             l10n_util::GetStringUTF16(IDS_PROFILE_MENU_SIGNIN_PROMO_BUTTON);
+          break;
+@@ -688,10 +685,7 @@ ProfileMenuView::GetIdentitySectionParams(const ProfileAttributesEntry& entry) {
+       // "Continue as" signin button.
+       account_info_for_signin_action = account_info_for_promos;
+       params.subtitle = l10n_util::GetStringFUTF16(
+-          base::FeatureList::IsEnabled(
+-              syncer::kReplaceSyncPromosWithSignInPromos)
+-              ? IDS_SETTINGS_PEOPLE_ACCOUNT_AWARE_SIGNIN_ACCOUNT_ROW_SUBTITLE_WITH_EMAIL_WITH_BOOKMARKS
+-              : IDS_SETTINGS_PEOPLE_ACCOUNT_AWARE_SIGNIN_ACCOUNT_ROW_SUBTITLE_WITH_EMAIL,
++          IDS_SETTINGS_PEOPLE_ACCOUNT_AWARE_SIGNIN_ACCOUNT_ROW_SUBTITLE_WITH_EMAIL,
+           base::UTF8ToUTF16(account_info_for_promos.email));
+       params.button_text = l10n_util::GetStringFUTF16(
+           IDS_PROFILES_DICE_WEB_ONLY_SIGNIN_BUTTON,
+@@ -775,52 +761,16 @@ void ProfileMenuView::BuildHistorySyncOptInButton() {
+       explicit_signin_access_point_.value_or(
+           signin_metrics::AccessPoint::kAvatarBubbleSignIn);
+   signin_metrics::LogSyncOptInOffered(access_point);
+-  AddPromoButton(
++  AddFeatureButton(
+       l10n_util::GetStringUTF16(IDS_PROFILE_MENU_SYNC_PROMO_ROW_BUTTON_LABEL),
+       base::BindRepeating(
+           &ProfileMenuView::OnSigninButtonClicked, base::Unretained(this),
+           IdentityManagerFactory::GetForProfile(&profile())
+               ->GetPrimaryAccountInfo(signin::ConsentLevel::kSignin),
+           ActionableItem::kHistorySyncOptInButton, access_point),
+-      kDevicesChromeRefreshIcon);
+-}
+-
+-void ProfileMenuView::OnBatchUploadDataReceived(
+-    std::map<syncer::DataType, syncer::LocalDataDescription> local_data_map) {
+-  size_t local_data_count = std::accumulate(
+-      local_data_map.begin(), local_data_map.end(), 0u,
+-      [](size_t current_count,
+-         std::pair<syncer::DataType, syncer::LocalDataDescription> local_data) {
+-        return current_count + local_data.second.local_data_models.size();
+-      });
+-  if (local_data_count == 0) {
+-    return;
+-  }
+-
+-  AddFeatureButton(
+-      l10n_util::GetPluralStringFUTF16(IDS_PROFILE_MENU_BATCH_UPLOAD_BUTTON,
+-                                       local_data_count),
+-      base::BindRepeating(&ProfileMenuView::OnBuildBatchUploadButtonClicked,
+-                          base::Unretained(this)),
+-      vector_icons::kSaveCloudIcon, /*icon_to_image_ratio=*/1.0f, /*index=*/0);
+-
+-  // Adding the button being asynchronous, the menu may be already been shown,
+-  // update the view size to accommodate for the addition of the button. In
+-  // theory this update should not even be visible to the user.
+-  if (views::Widget* widget = GetWidget()) {
+-    widget->SetSize(widget->non_client_view()->GetPreferredSize());
+-  }
+-}
+-
+-void ProfileMenuView::MaybeBuildBatchUploadButton() {
+-  if (!base::FeatureList::IsEnabled(
+-          syncer::kReplaceSyncPromosWithSignInPromos)) {
+-    return;
+-  }
+-
+-  BatchUploadServiceFactory::GetForProfile(&profile())
+-      ->GetLocalDataDescriptionsForAvailableTypes(base::BindOnce(
+-          &ProfileMenuView::OnBatchUploadDataReceived, base::Unretained(this)));
++      kDevicesChromeRefreshIcon, /*icon_to_image_ratio=*/1.0f,
++      kColorProfileMenuSyncPromoButtonBackground,
++      /*add_vertical_margin=*/true);
+ }
+ 
+ void ProfileMenuView::BuildAutofillSettingsButton() {
+@@ -998,8 +948,6 @@ void ProfileMenuView::BuildFeatureButtons() {
+       IsNewSyncPromoVariantEnabled()) {
+     BuildHistorySyncOptInButton();
+   }
+-  // May add the button asynchronously, order is not be guaranteed.
+-  MaybeBuildBatchUploadButton();
+   BuildAutofillSettingsButton();
+   MaybeBuildManageGoogleAccountButton();
+   BuildCustomizeProfileButton();
+diff --git a/chrome/browser/ui/views/profiles/profile_menu_view.h b/chrome/browser/ui/views/profiles/profile_menu_view.h
+index 4361ad66461f7..e5183611f24a7 100644
+--- a/chrome/browser/ui/views/profiles/profile_menu_view.h
++++ b/chrome/browser/ui/views/profiles/profile_menu_view.h
+@@ -23,7 +23,6 @@
+ #include "components/signin/core/browser/signin_header_helper.h"
+ #include "components/signin/public/base/signin_buildflags.h"
+ #include "components/signin/public/base/signin_metrics.h"
+-#include "components/sync/service/local_data_description.h"
+ #include "ui/views/controls/styled_label.h"
+ 
+ namespace signin_metrics {
+@@ -86,7 +85,6 @@ class ProfileMenuView : public ProfileMenuViewBase {
+   void OnManageProfilesButtonClicked();
+   void OnEditProfileButtonClicked();
+   void OnAutofillSettingsButtonClicked();
+-  void OnBuildBatchUploadButtonClicked();
+ 
+   // We normally close the bubble any time it becomes inactive but this can lead
+   // to flaky tests where unexpected UI events are triggering this behavior.
+@@ -97,7 +95,6 @@ class ProfileMenuView : public ProfileMenuViewBase {
+   void SetMenuTitleForAccessibility();
+   void BuildGuestIdentity();
+   void BuildHistorySyncOptInButton();
+-  void MaybeBuildBatchUploadButton();
+   void BuildAutofillSettingsButton();
+   void BuildCustomizeProfileButton();
+   void MaybeBuildChromeAccountSettingsButton();
+@@ -118,9 +115,6 @@ class ProfileMenuView : public ProfileMenuViewBase {
+ 
+   void BuildProfileManagementFeatureButtons();
+ 
+-  void OnBatchUploadDataReceived(
+-      std::map<syncer::DataType, syncer::LocalDataDescription> local_data_map);
+-
+   const raw_ref<Browser> browser_;
+ 
+   std::u16string menu_title_;
+diff --git a/chrome/browser/ui/views/profiles/profile_menu_view_base.cc b/chrome/browser/ui/views/profiles/profile_menu_view_base.cc
+index 19aa2437d27db..c666472fb6f04 100644
+--- a/chrome/browser/ui/views/profiles/profile_menu_view_base.cc
++++ b/chrome/browser/ui/views/profiles/profile_menu_view_base.cc
+@@ -462,26 +461,50 @@ void ProfileMenuViewBase::SetProfileIdentityWithCallToAction(
+           .Build());
+ }
+ 
+-void ProfileMenuViewBase::AddFeatureButton(const std::u16string& text,
+-                                           base::RepeatingClosure action,
+-                                           const gfx::VectorIcon& icon,
+-                                           float icon_to_image_ratio,
+-                                           std::optional<size_t> index) {
++void ProfileMenuViewBase::AddFeatureButton(
++    const std::u16string& text,
++    base::RepeatingClosure action,
++    const gfx::VectorIcon& icon,
++    float icon_to_image_ratio,
++    std::optional<size_t> index,
++    std::optional<ui::ColorId> background_color,
++    bool add_vertical_margin) {
+   // Initialize layout if this is the first time a button is added.
+   if (!features_container_->GetLayoutManager()) {
+     features_container_->SetLayoutManager(std::make_unique<views::BoxLayout>(
+         views::BoxLayout::Orientation::kVertical));
+   }
+ 
+   const size_t children_count = features_container_->children().size();
+   const size_t button_index = index.value_or(children_count);
+   CHECK_LE(button_index, children_count);
+-  features_container_->AddChildViewAt(
+-      CreateMenuRowButton(
+-          std::move(action),
+-          std::make_unique<FeatureButtonIconView>(icon, icon_to_image_ratio),
+-          text),
+-      button_index);
++  std::unique_ptr<HoverButton> button = CreateMenuRowButton(
++      std::move(action),
++      std::make_unique<FeatureButtonIconView>(icon, icon_to_image_ratio), text);
++  if (background_color.has_value()) {
++    constexpr int background_corner_radius = 8;
++    constexpr int button_background_vertical_size = 40;
++    button->SetBackground(views::CreateRoundedRectBackground(
++        *background_color, gfx::RoundedCornersF(background_corner_radius),
++        gfx::Insets::VH(0, kIdentityContainerMargin)));
++    // Button with a background should have a larger size to fit the background.
++    button->SetPreferredSize(
++        gfx::Size(kMenuWidth, button_background_vertical_size));
++  }
++  if (add_vertical_margin) {
++    auto margin = gfx::Insets().set_bottom(kDefaultMargin);
++    // Set the top margin only if there is a previous button with no background
++    // (to ensure proper spacing between buttons).
++    if (features_container_->children().size() > 0) {
++      auto* previous_button = views::AsViewClass<HoverButton>(
++          features_container_->children().back());
++      if (previous_button && !previous_button->background()) {
++        margin.set_top(kDefaultMargin);
++      }
++    }
++    button->SetProperty(views::kMarginsKey, std::move(margin));
++  }
++  features_container_->AddChildViewAt(std::move(button), button_index);
+ }
+ 
+ void ProfileMenuViewBase::SetProfileManagementHeading(
+diff --git a/chrome/browser/ui/views/profiles/profile_menu_view_base.h b/chrome/browser/ui/views/profiles/profile_menu_view_base.h
+index 6453fad23c8d3..49ecc4effb057 100644
+--- a/chrome/browser/ui/views/profiles/profile_menu_view_base.h
++++ b/chrome/browser/ui/views/profiles/profile_menu_view_base.h
+@@ -79,8 +79,7 @@ class ProfileMenuViewBase : public content::WebContentsDelegate,
+     kSigninReauthButton = 21,
+     kAutofillSettingsButton = 22,
+     kHistorySyncOptInButton = 23,
+-    kBatchUploadButton = 24,
+-    kMaxValue = kBatchUploadButton,
++    kMaxValue = kHistorySyncOptInButton,
+   };
+   // LINT.ThenChange(//tools/metrics/histograms/metadata/profile/enums.xml:ProfileMenuActionableItem)
+ 
+@@ -154,7 +153,9 @@ class ProfileMenuViewBase : public content::WebContentsDelegate,
+                         base::RepeatingClosure action,
+                         const gfx::VectorIcon& icon,
+                         float icon_to_image_ratio = 1.0f,
+-                        std::optional<size_t> index = std::nullopt);
++                        std::optional<size_t> index = std::nullopt,
++      std::optional<ui::ColorId> background_color = std::nullopt,
++      bool add_vertical_margin = false);
+   void SetProfileManagementHeading(const std::u16string& heading);
+   void AddAvailableProfile(const ui::ImageModel& image_model,
+                            const std::u16string& name,
+diff --git a/chrome/browser/ui/views/profiles/profile_menu_view_browsertest.cc b/chrome/browser/ui/views/profiles/profile_menu_view_browsertest.cc
+index fd0d43f55f1eb..fd4c042ca82e7 100644
+--- a/chrome/browser/ui/views/profiles/profile_menu_view_browsertest.cc
++++ b/chrome/browser/ui/views/profiles/profile_menu_view_browsertest.cc
+@@ -30,7 +30,6 @@
+ #include "chrome/browser/enterprise/browser_management/management_service_factory.h"
+ #include "chrome/browser/enterprise/util/managed_browser_utils.h"
+ #include "chrome/browser/extensions/extension_browsertest.h"
+-#include "chrome/browser/profiles/batch_upload/batch_upload_service_test_helper.h"
+ #include "chrome/browser/profiles/profile_attributes_entry.h"
+ #include "chrome/browser/profiles/profile_attributes_storage.h"
+ #include "chrome/browser/profiles/profile_manager.h"
+@@ -94,7 +93,6 @@
+ #include "components/signin/public/identity_manager/primary_account_mutator.h"
+ #include "components/supervised_user/core/browser/family_link_user_capabilities.h"
+ #include "components/supervised_user/test_support/supervised_user_signin_test_utils.h"
+-#include "components/sync/base/features.h"
+ #include "components/sync/service/sync_service.h"
+ #include "components/sync/service/sync_user_settings.h"
+ #include "components/user_education/common/feature_promo/feature_promo_controller.h"
+@@ -1369,53 +1367,6 @@ PROFILE_MENU_CLICK_WITH_FEATURE_TEST(kActionableItems_NewSyncPromoVariant,
+   RunTest();
+ }
+ 
+-// List of actionable items in the correct order as they appear in the menu. If
+-// a new button is added to the menu, it should also be added to this list.
+-constexpr std::array kActionableItems_WithPromoButtons = {
+-    ProfileMenuViewBase::ActionableItem::kHistorySyncOptInButton,
+-    ProfileMenuViewBase::ActionableItem::kBatchUploadButton,
+-    ProfileMenuViewBase::ActionableItem::kAutofillSettingsButton,
+-    ProfileMenuViewBase::ActionableItem::kManageGoogleAccountButton,
+-    ProfileMenuViewBase::ActionableItem::kEditProfileButton,
+-    ProfileMenuViewBase::ActionableItem::kSyncSettingsButton,
+-    ProfileMenuViewBase::ActionableItem::kSignoutButton,
+-    ProfileMenuViewBase::ActionableItem::kAddNewProfileButton,
+-    ProfileMenuViewBase::ActionableItem::kGuestProfileButton,
+-    ProfileMenuViewBase::ActionableItem::kManageProfilesButton,
+-    // The first button is added again to finish the cycle and test that
+-    // there are no other buttons at the end.
+-    ProfileMenuViewBase::ActionableItem::kHistorySyncOptInButton};
+-
+-const std::vector<base::test::FeatureRefAndParams>
+-    kProfileMenuPromosButtonsFeatureFlags = {
+-        {syncer::kReplaceSyncPromosWithSignInPromos, {}},
+-        {switches::kEnableHistorySyncOptinExpansionPill,
+-         {{"history-sync-optin-expansion-pill-option",
+-           "browse-across-devices-new-profile-menu-promo-variant"}}}};
+-
+-PROFILE_MENU_CLICK_WITH_FEATURE_TEST(kActionableItems_WithPromoButtons,
+-                                     ProfileMenuClickTest_WithPromoButtons,
+-                                     kProfileMenuPromosButtonsFeatureFlags,
+-                                     /*disabled_features=*/{}) {
+-  secondary_account_helper::SignInUnconsentedAccount(
+-      GetProfile(), &test_url_loader_factory_, "user@example.com");
+-  UnconsentedPrimaryAccountChecker(identity_manager()).Wait();
+-  // Check that the setup was successful.
+-  ASSERT_FALSE(
+-      identity_manager()->HasPrimaryAccount(signin::ConsentLevel::kSync));
+-  ASSERT_TRUE(
+-      identity_manager()->HasPrimaryAccount(signin::ConsentLevel::kSignin));
+-
+-  BatchUploadServiceTestHelper batch_upload_test_helper;
+-  // Exceptionally allow this override during the test in order not to affect
+-  // all existing tests.
+-  batch_upload_test_helper.SetupBatchUploadTestingFactoryInProfile(
+-      GetProfile());
+-  batch_upload_test_helper.SetLocalDataDescriptionForAllAvailableTypes();
+-
+-  RunTest();
+-}
+-
+ // List of actionable items in the correct order as they appear in the menu in
+ // signin pending state. If a new button is added to the menu, it should also be
+ // added to this list.
+diff --git a/tools/metrics/histograms/metadata/profile/enums.xml b/tools/metrics/histograms/metadata/profile/enums.xml
+index fcb16be18c16e..70502782160c7 100644
+--- a/tools/metrics/histograms/metadata/profile/enums.xml
++++ b/tools/metrics/histograms/metadata/profile/enums.xml
+@@ -435,7 +435,6 @@ chromium-metrics-reviews@google.com.
+   <int value="21" label="Reauth button (Verify it's you)"/>
+   <int value="22" label="Autofill settings button"/>
+   <int value="23" label="History sync opt-in button"/>
+-  <int value="24" label="Batch upload button"/>
+ </enum>
+ 
+ <!-- LINT.ThenChange(//chrome/browser/ui/views/profiles/profile_menu_view_base.h:ActionableItem) -->

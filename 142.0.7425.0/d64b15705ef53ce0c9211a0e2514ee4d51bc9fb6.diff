@@ -1,0 +1,161 @@
+diff --git a/chrome/browser/ui/color/win/native_chrome_color_mixer_win.cc b/chrome/browser/ui/color/win/native_chrome_color_mixer_win.cc
+index 49b32566dbaa3..23d324460ad28 100644
+--- a/chrome/browser/ui/color/win/native_chrome_color_mixer_win.cc
++++ b/chrome/browser/ui/color/win/native_chrome_color_mixer_win.cc
+@@ -18,12 +18,12 @@
+ #include "ui/color/color_mixer.h"
+ #include "ui/color/color_provider.h"
+ #include "ui/color/color_provider_key.h"
+-#include "ui/color/color_provider_manager.h"
+ #include "ui/color/color_provider_utils.h"
+ #include "ui/color/color_recipe.h"
+ #include "ui/color/color_transform.h"
+ #include "ui/color/win/accent_color_observer.h"
+ #include "ui/gfx/color_utils.h"
++#include "ui/native_theme/native_theme.h"
+ #include "ui/views/views_features.h"
+ 
+ namespace {
+@@ -101,12 +101,25 @@ FrameTransforms GetFrameTransforms(const ui::ColorProviderKey& key) {
+   return frame_transforms;
+ }
+ 
+-void EnsureColorProviderCacheWillBeResetWhenAccentColorStateChanges() {
++// Updates the NativeTheme's user_color to reflect the system accent color.
++// TODO(crbug.com/40280436): Explore moving logic into NativeThemeWin.
++void UpdateUserColor() {
++  const auto accent_color = ui::AccentColorObserver::Get()->accent_color();
++  ui::NativeTheme::GetInstanceForNativeUi()->set_user_color(accent_color);
++  ui::NativeTheme::GetInstanceForWeb()->set_user_color(accent_color);
++}
++
++void OnAccentColorUpdated() {
++  UpdateUserColor();
++  ui::NativeTheme::GetInstanceForNativeUi()->NotifyOnNativeThemeUpdated();
++  ui::NativeTheme::GetInstanceForWeb()->NotifyOnNativeThemeUpdated();
++}
++
++void UpdateUserColorWhenAccentColorStateChanges() {
++  UpdateUserColor();
+   static base::NoDestructor<base::CallbackListSubscription> subscription(
+-      ui::AccentColorObserver::Get()->Subscribe(base::BindRepeating(
+-          // CAUTION: Do not bind directly to `ui::ColorProviderManager::Get()`
+-          // here, as tests may reset that value!
+-          [] { ui::ColorProviderManager::Get().ResetColorProviderCache(); })));
++      ui::AccentColorObserver::Get()->Subscribe(
++          base::BindRepeating(&OnAccentColorUpdated)));
+ }
+ 
+ SkColor GetAccentBorderColor() {
+@@ -251,18 +264,8 @@ void AddNativeNonHighContrastColors(ui::ColorMixer& mixer,
+ 
+ void AddNativeChromeColorMixer(ui::ColorProvider* provider,
+                                const ui::ColorProviderKey& key) {
+-  // If anything related to the accent color state changes, the color provider
+-  // cache should be reset, so that changes to the recipes below are picked up
+-  // even if the browser frame's color provider key does not change.
+-  //
+-  // When `ui::AccentColorObserver::accent_color()` itself changes, this happens
+-  // anyway, because the change results in a call to
+-  // `ui::NativeTheme::NotifyOnNativeThemeUpdated()`, which will also reset the
+-  // cache. However, changes to other accent-color-related state (e.g.
+-  // `ui::AccentColorObserver::accent_border_color()`) will not (and should not)
+-  // trigger this codepath, but can still affect the recipes below and thus
+-  // require a reset.
+-  EnsureColorProviderCacheWillBeResetWhenAccentColorStateChanges();
++  UpdateUserColorWhenAccentColorStateChanges();
++
+   ui::ColorMixer& mixer = provider->AddMixer();
+ 
+   mixer[kColorAccentBorderActive] = {GetAccentBorderColor()};
+diff --git a/ui/native_theme/BUILD.gn b/ui/native_theme/BUILD.gn
+index 8d2fdc48dd1f2..304e64e86a303 100644
+--- a/ui/native_theme/BUILD.gn
++++ b/ui/native_theme/BUILD.gn
+@@ -80,8 +80,6 @@ component("native_theme") {
+       "os_settings_provider_win.h",
+     ]
+ 
+-    deps += [ "//ui/color:accent_color_observer" ]
+-
+     libs = [ "uxtheme.lib" ]
+   }
+ 
+diff --git a/ui/native_theme/native_theme.cc b/ui/native_theme/native_theme.cc
+index 70477998bbf76..fd318696da3f0 100644
+--- a/ui/native_theme/native_theme.cc
++++ b/ui/native_theme/native_theme.cc
+@@ -454,10 +454,6 @@ bool NativeTheme::UpdateWebInstance() const {
+     associated_web_instance_->inverted_colors_ = inverted_colors();
+     updated_web_instance = true;
+   }
+-  if (associated_web_instance_->user_color() != user_color()) {
+-    associated_web_instance_->user_color_ = user_color();
+-    updated_web_instance = true;
+-  }
+   if (associated_web_instance_->caret_blink_interval() !=
+       caret_blink_interval()) {
+     associated_web_instance_->caret_blink_interval_ = caret_blink_interval();
+diff --git a/ui/native_theme/native_theme_win.cc b/ui/native_theme/native_theme_win.cc
+index ce4cd702625fd..7cb8a878f49b7 100644
+--- a/ui/native_theme/native_theme_win.cc
++++ b/ui/native_theme/native_theme_win.cc
+@@ -52,7 +52,6 @@
+ #include "third_party/skia/include/private/chromium/SkPMColor.h"
+ #include "ui/color/color_id.h"
+ #include "ui/color/color_provider.h"
+-#include "ui/color/win/accent_color_observer.h"
+ #include "ui/color/win/native_color_mixers_win.h"
+ #include "ui/display/win/screen_win.h"
+ #include "ui/gfx/color_conversions.h"
+@@ -273,11 +272,6 @@ NativeThemeWin::NativeThemeWin() {
+   // The below code attempts calls to user32.dll, so avoid it if those calls are
+   // not possible.
+   if (base::win::IsUser32AndGdi32Available()) {
+-    set_user_color(AccentColorObserver::Get()->accent_color());
+-    accent_color_subscription_ = AccentColorObserver::Get()->Subscribe(
+-        base::BindRepeating(&NativeThemeWin::OnAccentColorMaybeChanged,
+-                            base::Unretained(this)));
+-
+     // If there's no sequenced task runner handle, we can't be called back for
+     // registry changes. This generally happens in tests.
+     const bool observers_can_operate =
+@@ -374,14 +368,6 @@ void NativeThemeWin::OnWndProc(HWND hwnd,
+   NotifyOnNativeThemeUpdated();
+ }
+ 
+-void NativeThemeWin::OnAccentColorMaybeChanged() {
+-  const auto accent_color = AccentColorObserver::Get()->accent_color();
+-  if (user_color() != accent_color) {
+-    set_user_color(accent_color);
+-    NotifyOnNativeThemeUpdated();
+-  }
+-}
+-
+ void NativeThemeWin::PaintMenuSeparator(
+     cc::PaintCanvas* canvas,
+     const ColorProvider* color_provider,
+diff --git a/ui/native_theme/native_theme_win.h b/ui/native_theme/native_theme_win.h
+index 8e572c25f4345..0dbd40d8e5e0c 100644
+--- a/ui/native_theme/native_theme_win.h
++++ b/ui/native_theme/native_theme_win.h
+@@ -87,9 +87,6 @@ class COMPONENT_EXPORT(NATIVE_THEME) NativeThemeWin : public NativeTheme {
+   // Called by `hwnd_subscription_`.
+   void OnWndProc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
+ 
+-  // Updates `accent_color_`. If it changed, notifies callbacks.
+-  void OnAccentColorMaybeChanged();
+-
+   // Update the locally cached set of system colors.
+   void UpdateSystemColors();
+ 
+@@ -212,9 +209,6 @@ class COMPONENT_EXPORT(NATIVE_THEME) NativeThemeWin : public NativeTheme {
+           base::BindRepeating(&NativeThemeWin::OnWndProc,
+                               base::Unretained(this)));
+ 
+-  // Accent color subscription.
+-  base::CallbackListSubscription accent_color_subscription_;
+-
+   bool in_dark_mode_ = false;
+ };
+ 
