@@ -1,0 +1,1 @@
+[AccentColor] Web themes should always have access to accent color    2025/9/24 8:38:36    2cea5e6bec729529e3d9eb2feec62af133785f5f

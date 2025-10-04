@@ -1,0 +1,116 @@
+
+
+diff --git a/chrome/browser/metrics/antivirus_metrics_provider_win_unittest.cc b/chrome/browser/metrics/antivirus_metrics_provider_win_unittest.cc
+index 101427474e591..406ed80225911 100644
+--- a/chrome/browser/metrics/antivirus_metrics_provider_win_unittest.cc
++++ b/chrome/browser/metrics/antivirus_metrics_provider_win_unittest.cc
+@@ -16,6 +16,7 @@
+ #include "base/threading/thread_checker.h"
+ #include "base/threading/thread_restrictions.h"
+ #include "base/version.h"
++#include "base/win/windows_version.h"
+ #include "chrome/services/util_win/util_win_impl.h"
+ #include "components/variations/hashing.h"
+ #include "testing/gtest/include/gtest/gtest.h"
+@@ -25,36 +26,41 @@ namespace {
+ void VerifySystemProfileData(const metrics::SystemProfileProto& system_profile,
+                              bool expect_unhashed_value,
+                              bool second_run) {
++  if (base::win::GetVersion() < base::win::Version::WIN8)
++    return;
++
+   // The name of Windows Defender changed sometime in Windows 10, so any of the
+   // following is possible.
+   constexpr char kWindowsDefender[] = "Windows Defender";
+   constexpr char kWindowsDefenderAntivirus[] = "Windows Defender Antivirus";
+ 
+-  bool defender_found = false;
+-  uint32_t last_hash = 0xdeadbeef;
+-  for (const auto& av : system_profile.antivirus_product()) {
+-    if (av.has_product_name_hash()) {
+-      last_hash = av.product_name_hash();
+-    }
+-    if (av.product_name_hash() == variations::HashName(kWindowsDefender) ||
+-        av.product_name_hash() ==
+-            variations::HashName(kWindowsDefenderAntivirus)) {
+-      defender_found = true;
+-      if (expect_unhashed_value) {
+-        EXPECT_TRUE(av.has_product_name());
+-        EXPECT_TRUE(av.product_name() == kWindowsDefender ||
+-                    av.product_name() == kWindowsDefenderAntivirus);
+-      } else {
+-        EXPECT_FALSE(av.has_product_name());
++  if (base::win::GetVersion() >= base::win::Version::WIN8) {
++    bool defender_found = false;
++    uint32_t last_hash = 0xdeadbeef;
++    for (const auto& av : system_profile.antivirus_product()) {
++      if (av.has_product_name_hash())
++        last_hash = av.product_name_hash();
++      if (av.product_name_hash() ==
++          variations::HashName(kWindowsDefender) ||
++          av.product_name_hash() ==
++          variations::HashName(kWindowsDefenderAntivirus)) {
++        defender_found = true;
++        if (expect_unhashed_value) {
++          EXPECT_TRUE(av.has_product_name());
++          EXPECT_TRUE(av.product_name() == kWindowsDefender ||
++                      av.product_name() == kWindowsDefenderAntivirus);
++        } else {
++          EXPECT_FALSE(av.has_product_name());
++        }
++        break;
+       }
+-      break;
+     }
++    EXPECT_TRUE(defender_found)
++        << "expect_unhashed_value = " << expect_unhashed_value
++        << ", second_run = " << second_run << ", "
++        << system_profile.antivirus_product().size()
++        << " antivirus products found. Last hash is " << last_hash << ".";
+   }
+-  EXPECT_TRUE(defender_found)
+-      << "expect_unhashed_value = " << expect_unhashed_value
+-      << ", second_run = " << second_run << ", "
+-      << system_profile.antivirus_product().size()
+-      << " antivirus products found. Last hash is " << last_hash << ".";
+ }
+ 
+ }  // namespace
+diff --git a/chrome/browser/metrics/chrome_browser_main_extra_parts_metrics.cc b/chrome/browser/metrics/chrome_browser_main_extra_parts_metrics.cc
+index 0d586dcc2d606..18cb28084c052 100644
+--- a/chrome/browser/metrics/chrome_browser_main_extra_parts_metrics.cc
++++ b/chrome/browser/metrics/chrome_browser_main_extra_parts_metrics.cc
+@@ -763,6 +763,9 @@ void RecordIsPinnedToTaskbarHistogram() {
+ // here:
+ // https://blogs.blackberry.com/en/2017/10/windows-10-parallel-loading-breakdown.
+ bool IsParallelDllLoadingEnabled() {
++  // Parallel DLL loading is only available on Windows 10 and above.
++  if (base::win::GetVersion() < base::win::Version::WIN10)
++    return false;
+   base::FilePath exe_path;
+   if (!base::PathService::Get(base::FILE_EXE, &exe_path))
+     return false;
+diff --git a/chrome/browser/net/stub_resolver_config_reader.cc b/chrome/browser/net/stub_resolver_config_reader.cc
+index 7f470a241d616..4177a0bc18e30 100644
+--- a/chrome/browser/net/stub_resolver_config_reader.cc
++++ b/chrome/browser/net/stub_resolver_config_reader.cc
+@@ -84,7 +85,18 @@ enum class SecureDnsModeDetailsForHistogram {
+ 
+ #if BUILDFLAG(IS_WIN)
+ bool ShouldDisableDohForWindowsParentalControls() {
+-  return GetWinParentalControls().web_filter;
++  const WinParentalControls& parental_controls = GetWinParentalControls();
++  if (parental_controls.web_filter)
++    return true;
++
++  // Some versions before Windows 8 may not fully support |web_filter|, so
++  // conservatively disable doh for any recognized parental controls.
++  if (parental_controls.any_restrictions &&
++    base::win::GetVersion() < base::win::Version::WIN8) {
++    return true;
++  }
++
++  return false;
+ }
+ 
+ // Defines the base::Feature for controlling the ZTDNS check.

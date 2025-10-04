@@ -4,6 +4,10 @@ Chromium is an open-source browser project that aims to build a safer, faster, a
 
 Chrome 109 is the last version to support Windows 7. This repository includes patches that enable Chromium to run on Windows 7 beyond the official end-of-support date, allowing users to continue using the latest features and improvements from the Chromium project.
 
+I have successfully created  patches to make Chromium work again on Windows 7 since October 2023  (though I didn’t release them immediately). Now, two years later, I have continued to apply these patches to newer versions of Chromium by  making minor adjustments on these patches. However, several growing challenges have  forced me to reevaluate the viability of these outdated patches. These  challenges include: (1) the presence of minor but difficult-to-fix bugs  in the patches, and (2) the increasing difficulty of adapting the  patches to newer Chromium versions due to major ongoing changes in Chromium UI code.
+
+Given these  challenges, I have decided to spend the next few months reworking the  patches in an attempt to create new ones that address the challenges  mentioned above. If the rework successfully resolves these challenges,  Chromium for windows 7 will be built using the new patches. Otherwise,  Chromium for Windows 7 will no longer update. During this  rework period, Chromium for windows 7 will continue update but at a slower pace.
+
 ## Platform Support
 
 Windows 7 SP1 with KB3080149 (for EventSetInformation) and KB4019990 (for d3dcompiler_47.dll) installed, Windows 8, Windows 10, Windows 11.

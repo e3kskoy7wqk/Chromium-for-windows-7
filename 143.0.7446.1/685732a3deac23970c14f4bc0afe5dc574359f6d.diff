@@ -1,0 +1,431 @@
+diff --git a/chrome/browser/ui/views/frame/browser_desktop_window_tree_host.h b/chrome/browser/ui/views/frame/browser_desktop_window_tree_host.h
+index 6f304c5167f6d..a4f4792c951d5 100644
+--- a/chrome/browser/ui/views/frame/browser_desktop_window_tree_host.h
++++ b/chrome/browser/ui/views/frame/browser_desktop_window_tree_host.h
+@@ -29,6 +29,8 @@ class BrowserDesktopWindowTreeHost {
+ 
+   virtual views::DesktopWindowTreeHost* AsDesktopWindowTreeHost() = 0;
+ 
++  virtual int GetMinimizeButtonOffset() const = 0;
++
+   // Returns true if the OS takes care of showing the system menu. Returning
+   // false means BrowserWidget handles showing the system menu.
+   virtual bool UsesNativeSystemMenu() const = 0;
+diff --git a/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_linux.cc b/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_linux.cc
+index 339b18bd8bfc2..a05768cd9cb26 100644
+--- a/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_linux.cc
++++ b/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_linux.cc
+@@ -118,6 +118,10 @@ BrowserDesktopWindowTreeHostLinux::AsDesktopWindowTreeHost() {
+   return this;
+ }
+ 
++int BrowserDesktopWindowTreeHostLinux::GetMinimizeButtonOffset() const {
++  return 0;
++}
++
+ bool BrowserDesktopWindowTreeHostLinux::UsesNativeSystemMenu() const {
+   return false;
+ }
+diff --git a/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_linux.h b/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_linux.h
+index 01ef9a93657f9..1590e9478ce29 100644
+--- a/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_linux.h
++++ b/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_linux.h
+@@ -69,6 +69,7 @@ class BrowserDesktopWindowTreeHostLinux
+ 
+   // BrowserDesktopWindowTreeHost:
+   DesktopWindowTreeHost* AsDesktopWindowTreeHost() override;
++  int GetMinimizeButtonOffset() const override;
+   bool UsesNativeSystemMenu() const override;
+ 
+   // BrowserWindowTreeHostPlatform:
+diff --git a/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_win.cc b/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_win.cc
+index 371396d34b55f..f9dc8a22ef25d 100644
+--- a/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_win.cc
++++ b/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_win.cc
+@@ -259,6 +259,10 @@ BrowserDesktopWindowTreeHostWin::AsDesktopWindowTreeHost() {
+   return this;
+ }
+ 
++int BrowserDesktopWindowTreeHostWin::GetMinimizeButtonOffset() const {
++  return minimize_button_metrics_.GetMinimizeButtonOffsetX();
++}
++
+ bool BrowserDesktopWindowTreeHostWin::UsesNativeSystemMenu() const {
+   return true;
+ }
+@@ -411,11 +415,22 @@ void BrowserDesktopWindowTreeHostWin::HandleDestroying() {
+   DesktopWindowTreeHostWin::HandleDestroying();
+ }
+ 
++void BrowserDesktopWindowTreeHostWin::HandleWindowScaleFactorChanged(
++    float window_scale_factor) {
++  DesktopWindowTreeHostWin::HandleWindowScaleFactorChanged(window_scale_factor);
++  minimize_button_metrics_.OnDpiChanged();
++}
++
+ bool BrowserDesktopWindowTreeHostWin::PreHandleMSG(UINT message,
+                                                    WPARAM w_param,
+                                                    LPARAM l_param,
+                                                    LRESULT* result) {
+   switch (message) {
++    case WM_ACTIVATE:
++      if (LOWORD(w_param) != WA_INACTIVE) {
++        minimize_button_metrics_.OnHWNDActivated();
++      }
++      return false;
+     case WM_ENDSESSION:
+       chrome::SessionEnding();
+       return true;
+@@ -439,6 +454,9 @@ void BrowserDesktopWindowTreeHostWin::PostHandleMSG(UINT message,
+       UpdateWorkspace();
+       break;
+     }
++    case WM_CREATE:
++      minimize_button_metrics_.Init(GetHWND());
++      break;
+     case WM_WINDOWPOSCHANGED: {
+       // Windows lies to us about the position of the minimize button before a
+       // window is visible. We use this position to place the incognito avatar
+diff --git a/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_win.h b/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_win.h
+index 0297adfbfb557..eed84dde9e548 100644
+--- a/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_win.h
++++ b/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_win.h
+@@ -19,6 +19,7 @@
+ #include "base/win/scoped_gdi_object.h"
+ #include "chrome/browser/profiles/profile_attributes_storage.h"
+ #include "chrome/browser/ui/views/frame/browser_desktop_window_tree_host.h"
++#include "chrome/browser/ui/views/frame/minimize_button_metrics_win.h"
+ #include "ui/base/mojom/window_show_state.mojom-forward.h"
+ #include "ui/views/widget/desktop_aura/desktop_window_tree_host_win.h"
+ 
+@@ -53,6 +54,7 @@ class BrowserDesktopWindowTreeHostWin
+ 
+   // Overridden from BrowserDesktopWindowTreeHost:
+   DesktopWindowTreeHost* AsDesktopWindowTreeHost() override;
++  int GetMinimizeButtonOffset() const override;
+   bool UsesNativeSystemMenu() const override;
+ 
+   // Overridden from DesktopWindowTreeHostWin:
+@@ -66,6 +68,7 @@ class BrowserDesktopWindowTreeHostWin
+   bool GetDwmFrameInsetsInPixels(gfx::Insets* insets) const override;
+   void HandleCreate() override;
+   void HandleDestroying() override;
++  void HandleWindowScaleFactorChanged(float window_scale_factor) override;
+   bool PreHandleMSG(UINT message,
+                     WPARAM w_param,
+                     LPARAM l_param,
+@@ -92,6 +95,8 @@ class BrowserDesktopWindowTreeHostWin
+   raw_ptr<BrowserView> browser_view_;
+   raw_ptr<BrowserWidget> browser_widget_;
+ 
++  MinimizeButtonMetrics minimize_button_metrics_;
++
+   std::unique_ptr<BrowserWindowPropertyManager>
+       browser_window_property_manager_;
+ 
+diff --git a/chrome/browser/ui/views/frame/browser_frame_view_win.cc b/chrome/browser/ui/views/frame/browser_frame_view_win.cc
+index caf385454aa68..ae741ae3825e8 100644
+--- a/chrome/browser/ui/views/frame/browser_frame_view_win.cc
++++ b/chrome/browser/ui/views/frame/browser_frame_view_win.cc
+@@ -15,7 +15,6 @@
+ #include <memory>
+ #include <utility>
+ 
+-#include "base/scoped_observation.h"
+ #include "base/trace_event/common/trace_event_common.h"
+ #include "base/trace_event/trace_event.h"
+ #include "chrome/app/chrome_command_ids.h"
+@@ -27,7 +26,6 @@
+ #include "chrome/browser/ui/view_ids.h"
+ #include "chrome/browser/ui/views/frame/browser_caption_button_container_win.h"
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+-#include "chrome/browser/ui/views/frame/minimize_button_metrics_win.h"
+ #include "chrome/browser/ui/views/frame/tab_strip_view_interface.h"
+ #include "chrome/browser/ui/views/frame/webui_tab_strip_container_view.h"
+ #include "chrome/browser/ui/views/tabs/new_tab_button.h"
+@@ -57,8 +55,6 @@
+ #include "ui/gfx/image/image.h"
+ #include "ui/gfx/scoped_canvas.h"
+ #include "ui/strings/grit/ui_strings.h"
+-#include "ui/views/widget/widget.h"
+-#include "ui/views/widget/widget_observer.h"
+ #include "ui/views/win/hwnd_util.h"
+ #include "ui/views/window/client_view.h"
+ 
+@@ -96,68 +92,12 @@ constexpr int kIconTitleSpacing = 5;
+ 
+ }  // namespace
+ 
+-// Wrapper around MinimizeButtonMetrics so that calls don't need to be routed
+-// through the widget, native widget, and desktop window tree host.
+-class BrowserFrameViewWin::CaptionButtonMetrics : public views::WidgetObserver {
+- public:
+-  CaptionButtonMetrics() = default;
+-  CaptionButtonMetrics(const CaptionButtonMetrics&) = delete;
+-  void operator=(const CaptionButtonMetrics&) = delete;
+-  ~CaptionButtonMetrics() override = default;
+-
+-  void Init(views::Widget* widget) {
+-    CHECK(widget);
+-    widget_ = widget;
+-    observation_.Observe(widget);
+-
+-    // Immediately set up if there is already a HWND.
+-    if (HWND hwnd = views::HWNDForWidget(widget_)) {
+-      minimize_button_metrics_.Init(hwnd);
+-      if (widget->IsActive()) {
+-        minimize_button_metrics_.OnHWNDActivated();
+-      }
+-    }
+-  }
+-
+-  void OnDeviceScaleFactorChanged() { minimize_button_metrics_.OnDpiChanged(); }
+-
+-  int GetMinimizeButtonOffset() const {
+-    return minimize_button_metrics_.GetMinimizeButtonOffsetX();
+-  }
+-
+-  // views::WidgetObserver:
+-
+-  void OnWidgetCreated(views::Widget*) override {
+-    HWND hwnd = views::HWNDForWidget(widget_);
+-    CHECK(hwnd);
+-    minimize_button_metrics_.Init(hwnd);
+-  }
+-
+-  void OnWidgetDestroyed(views::Widget*) override {
+-    observation_.Reset();
+-    widget_ = nullptr;
+-  }
+-
+-  void OnWidgetActivationChanged(views::Widget*, bool active) override {
+-    if (active) {
+-      minimize_button_metrics_.OnHWNDActivated();
+-    }
+-  }
+-
+- private:
+-  raw_ptr<views::Widget> widget_ = nullptr;
+-  base::ScopedObservation<views::Widget, views::WidgetObserver> observation_{
+-      this};
+-  MinimizeButtonMetrics minimize_button_metrics_;
+-};
+-
+ ///////////////////////////////////////////////////////////////////////////////
+ // BrowserFrameViewWin, public:
+ 
+ BrowserFrameViewWin::BrowserFrameViewWin(BrowserWidget* widget,
+                                          BrowserView* browser_view)
+-    : BrowserFrameView(widget, browser_view),
+-      caption_button_metrics_(std::make_unique<CaptionButtonMetrics>()) {
++    : BrowserFrameView(widget, browser_view) {
+   // We initialize all fields despite some of them being unused in some modes,
+   // since it's possible for modes to flip dynamically (e.g. if the user enables
+   // a high-contrast theme). Throbber icons are only used when ShowSystemIcon()
+@@ -550,18 +490,6 @@ void BrowserFrameViewWin::Layout(PassKey) {
+   LayoutSuperclass<BrowserFrameView>(this);
+ }
+ 
+-void BrowserFrameViewWin::AddedToWidget() {
+-  caption_button_metrics_->Init(GetWidget());
+-}
+-
+-void BrowserFrameViewWin::OnDeviceScaleFactorChanged(
+-    float old_device_scale_factor,
+-    float new_device_scale_factor) {
+-  BrowserFrameView::OnDeviceScaleFactorChanged(old_device_scale_factor,
+-                                               new_device_scale_factor);
+-  caption_button_metrics_->OnDeviceScaleFactorChanged();
+-}
+-
+ ///////////////////////////////////////////////////////////////////////////////
+ // BrowserFrameViewWin, private:
+ 
+@@ -699,14 +627,14 @@ int BrowserFrameViewWin::CaptionButtonsRegionWidth() const {
+   std::optional<int> system_caption_buttons_width;
+   if (!base::FeatureList::IsEnabled(kAvoidUnnecessaryGetMinimizeButtonOffset)) {
+     system_caption_buttons_width =
+-        caption_button_metrics_->GetMinimizeButtonOffset();
++        width() - browser_widget()->GetMinimizeButtonOffset();
+   }
+ 
+   int total_width = caption_button_container_->size().width();
+   if (!ShouldBrowserCustomDrawTitlebar(browser_view())) {
+     if (!system_caption_buttons_width.has_value()) {
+       system_caption_buttons_width =
+-          caption_button_metrics_->GetMinimizeButtonOffset();
++          width() - browser_widget()->GetMinimizeButtonOffset();
+     }
+     total_width += system_caption_buttons_width.value();
+   }
+@@ -904,7 +832,7 @@ void BrowserFrameViewWin::LayoutCaptionButtons() {
+   const int system_caption_buttons_width =
+       ShouldBrowserCustomDrawTitlebar(browser_view())
+           ? 0
+-          : caption_button_metrics_->GetMinimizeButtonOffset();
++          : width() - browser_widget()->GetMinimizeButtonOffset();
+ 
+   const int height =
+       !browser_view()->GetWebAppFrameToolbarPreferredSize().IsEmpty()
+diff --git a/chrome/browser/ui/views/frame/browser_frame_view_win.h b/chrome/browser/ui/views/frame/browser_frame_view_win.h
+index c88c7886f1a61..b252503df8377 100644
+--- a/chrome/browser/ui/views/frame/browser_frame_view_win.h
++++ b/chrome/browser/ui/views/frame/browser_frame_view_win.h
+@@ -85,15 +85,10 @@ class BrowserFrameViewWin : public BrowserFrameView, public TabIconViewModel {
+   // views::View:
+   void OnPaint(gfx::Canvas* canvas) override;
+   void Layout(PassKey) override;
+-  void AddedToWidget() override;
+-  void OnDeviceScaleFactorChanged(float old_device_scale_factor,
+-                                  float new_device_scale_factor) override;
+ 
+  private:
+   friend class BrowserCaptionButtonContainer;
+ 
+-  class CaptionButtonMetrics;
+-
+   // Describes the type of titlebar that a window might have; used to query
+   // whether specific elements may be present.
+   enum class TitlebarType {
+@@ -189,9 +184,6 @@ class BrowserFrameViewWin : public BrowserFrameView, public TabIconViewModel {
+           base::BindRepeating(&BrowserFrameViewWin::TabletModeChanged,
+                               base::Unretained(this)));
+ 
+-  // Tracks information about caption button location, size, etc.
+-  std::unique_ptr<CaptionButtonMetrics> caption_button_metrics_;
+-
+   // Whether or not the window throbber is currently animating.
+   bool throbber_running_ = false;
+ 
+diff --git a/chrome/browser/ui/views/frame/browser_native_widget.h b/chrome/browser/ui/views/frame/browser_native_widget.h
+index 4c5dd444acab9..d1e9a932c39fb 100644
+--- a/chrome/browser/ui/views/frame/browser_native_widget.h
++++ b/chrome/browser/ui/views/frame/browser_native_widget.h
+@@ -82,6 +82,11 @@ class BrowserNativeWidget {
+ 
+  protected:
+   friend class BrowserWidget;
++
++  // BrowserWidget pass-thrus
++  // --------------------------------------------------- See browser_widget.h
++  // for documentation:
++  virtual int GetMinimizeButtonOffset() const = 0;
+ };
+ 
+ #endif  // CHROME_BROWSER_UI_VIEWS_FRAME_BROWSER_NATIVE_WIDGET_H_
+diff --git a/chrome/browser/ui/views/frame/browser_native_widget_ash.cc b/chrome/browser/ui/views/frame/browser_native_widget_ash.cc
+index e40416204fd90..c1eb87a843be1 100644
+--- a/chrome/browser/ui/views/frame/browser_native_widget_ash.cc
++++ b/chrome/browser/ui/views/frame/browser_native_widget_ash.cc
+@@ -236,6 +236,10 @@ bool BrowserNativeWidgetAsh::UsesNativeSystemMenu() const {
+   return false;
+ }
+ 
++int BrowserNativeWidgetAsh::GetMinimizeButtonOffset() const {
++  return 0;
++}
++
+ bool BrowserNativeWidgetAsh::ShouldRestorePreviousBrowserWidgetState() const {
+   CHECK(browser_view_);
+   // If there is no window info from full restore, maybe use the session
+diff --git a/chrome/browser/ui/views/frame/browser_native_widget_ash.h b/chrome/browser/ui/views/frame/browser_native_widget_ash.h
+index b8a631253b33a..e681ec7be7634 100644
+--- a/chrome/browser/ui/views/frame/browser_native_widget_ash.h
++++ b/chrome/browser/ui/views/frame/browser_native_widget_ash.h
+@@ -39,6 +39,7 @@ class BrowserNativeWidgetAsh : public views::NativeWidgetAura,
+       views::Widget::InitParams::Ownership ownership) override;
+   bool UseCustomFrame() const override;
+   bool UsesNativeSystemMenu() const override;
++  int GetMinimizeButtonOffset() const override;
+   bool ShouldSaveWindowPlacement() const override;
+   void GetWindowPlacement(
+       gfx::Rect* bounds,
+diff --git a/chrome/browser/ui/views/frame/browser_native_widget_aura.cc b/chrome/browser/ui/views/frame/browser_native_widget_aura.cc
+index b4c409f8c0e43..4e4e8190c1f7d 100644
+--- a/chrome/browser/ui/views/frame/browser_native_widget_aura.cc
++++ b/chrome/browser/ui/views/frame/browser_native_widget_aura.cc
+@@ -92,6 +92,10 @@ bool BrowserNativeWidgetAura::UsesNativeSystemMenu() const {
+   return browser_desktop_window_tree_host_->UsesNativeSystemMenu();
+ }
+ 
++int BrowserNativeWidgetAura::GetMinimizeButtonOffset() const {
++  return browser_desktop_window_tree_host_->GetMinimizeButtonOffset();
++}
++
+ bool BrowserNativeWidgetAura::ShouldSaveWindowPlacement() const {
+   // The placement can always be stored.
+   return true;
+diff --git a/chrome/browser/ui/views/frame/browser_native_widget_aura.h b/chrome/browser/ui/views/frame/browser_native_widget_aura.h
+index 746909359a6d5..38a3f7f2eeae4 100644
+--- a/chrome/browser/ui/views/frame/browser_native_widget_aura.h
++++ b/chrome/browser/ui/views/frame/browser_native_widget_aura.h
+@@ -55,6 +55,7 @@ class BrowserNativeWidgetAura : public views::DesktopNativeWidgetAura,
+       views::Widget::InitParams::Ownership ownership) override;
+   bool UseCustomFrame() const override;
+   bool UsesNativeSystemMenu() const override;
++  int GetMinimizeButtonOffset() const override;
+   bool ShouldSaveWindowPlacement() const override;
+   void GetWindowPlacement(
+       gfx::Rect* bounds,
+diff --git a/chrome/browser/ui/views/frame/browser_native_widget_mac.h b/chrome/browser/ui/views/frame/browser_native_widget_mac.h
+index 1423d061aa00c..25e1a83833efe 100644
+--- a/chrome/browser/ui/views/frame/browser_native_widget_mac.h
++++ b/chrome/browser/ui/views/frame/browser_native_widget_mac.h
+@@ -79,6 +79,9 @@ class BrowserNativeWidgetMac : public views::NativeWidgetMac,
+   void OnWindowInitialized() override;
+   void OnWindowDestroying(gfx::NativeWindow window) override;
+ 
++  // Overridden from BrowserNativeWidget:
++  int GetMinimizeButtonOffset() const override;
++
+   // Overridden from CommandObserver:
+   void EnabledStateChangedForCommand(int id, bool enabled) override;
+ 
+diff --git a/chrome/browser/ui/views/frame/browser_native_widget_mac.mm b/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
+index 0f8f75c1986b0..f71820d67d2e0 100644
+--- a/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
++++ b/chrome/browser/ui/views/frame/browser_native_widget_mac.mm
+@@ -451,6 +451,11 @@ void BrowserNativeWidgetMac::OnWindowDestroying(
+   [ns_window setWindowTouchBarDelegate:nil];
+ }
+ 
++int BrowserNativeWidgetMac::GetMinimizeButtonOffset() const {
++  NOTIMPLEMENTED();
++  return 0;
++}
++
+ void BrowserNativeWidgetMac::EnabledStateChangedForCommand(int id,
+                                                            bool enabled) {
+   switch (id) {
+diff --git a/chrome/browser/ui/views/frame/browser_widget.cc b/chrome/browser/ui/views/frame/browser_widget.cc
+index 070088583810c..b2d3f6d536e54 100644
+--- a/chrome/browser/ui/views/frame/browser_widget.cc
++++ b/chrome/browser/ui/views/frame/browser_widget.cc
+@@ -226,6 +226,12 @@ void BrowserWidget::InitBrowserWidget() {
+   }
+ }
+ 
++int BrowserWidget::GetMinimizeButtonOffset() const {
++  return browser_native_widget_
++             ? browser_native_widget_->GetMinimizeButtonOffset()
++             : 0;
++}
++
+ void BrowserWidget::LayoutWebAppWindowTitle(
+     const gfx::Rect& available_space,
+     views::Label& window_title_label) const {
+diff --git a/chrome/browser/ui/views/frame/browser_widget.h b/chrome/browser/ui/views/frame/browser_widget.h
+index 50f7b06625376..694f00c747057 100644
+--- a/chrome/browser/ui/views/frame/browser_widget.h
++++ b/chrome/browser/ui/views/frame/browser_widget.h
+@@ -75,6 +75,10 @@ class BrowserWidget : public views::Widget,
+   // Initialize the frame (creates the underlying native window).
+   void InitBrowserWidget();
+ 
++  // Determine the distance of the left edge of the minimize button from the
++  // left edge of the window. Used in our Non-Client View's Layout.
++  int GetMinimizeButtonOffset() const;
++
+   // Lays out the window title for a web app within the given available space.
+   // Unlike the above GetBounds methods this is not just a method to return the
+   // bounds the title should occupy, since different implementations might also
